@@ -1,6 +1,6 @@
 #include "moonlight_wasm.hpp"
 
-#include <queue>
+#include <deque>
 #include <vector>
 
 #include <AL/al.h>
@@ -27,7 +27,7 @@ static int s_jitterFrames = 0;  // = ceil(targetJitterMs / frameDurationMs), set
 static int s_numBuffers   = 0;  // = s_jitterFrames (AL pool matches jitter depth)
 
 // Software jitter queue: decoded frames sit here before being fed to AL.
-static std::queue<std::vector<opus_int16>> s_jitterQueue;
+static std::deque<std::vector<opus_int16>> s_jitterQueue;
 static bool     s_jitterReady = false;
 static uint64_t s_dropCount   = 0;
 
@@ -48,7 +48,7 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
     s_jitterFrames, s_jitterFrames * frameDurationMs, targetJitterMs);
 
   // Clear any leftover state from a previous session
-  while (!s_jitterQueue.empty()) s_jitterQueue.pop();
+  while (!s_jitterQueue.empty()) s_jitterQueue.pop_front();
   s_jitterReady = false;
   s_dropCount   = 0;
 
@@ -144,7 +144,7 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
 void MoonlightInstance::AudDecCleanup(void) {
   ClLogMessage("AudDecCleanup\n");
 
-  while (!s_jitterQueue.empty()) s_jitterQueue.pop();
+  while (!s_jitterQueue.empty()) s_jitterQueue.pop_front();
 
   if (s_AlSource) {
     alSourceStop(s_AlSource);
@@ -195,7 +195,7 @@ void MoonlightInstance::AudDecDecodeAndPlaySample(char* sampleData, int sampleLe
 
   // Push decoded frame into jitter queue
   size_t frameElems = (size_t)decodeLen * s_channelCount;
-  s_jitterQueue.push(std::vector<opus_int16>(
+  s_jitterQueue.push_back(std::vector<opus_int16>(
     s_DecodeBuffer.data(), s_DecodeBuffer.data() + frameElems));
 
   // Accumulate until the jitter buffer is full before feeding AL
@@ -215,13 +215,14 @@ void MoonlightInstance::AudDecDecodeAndPlaySample(char* sampleData, int sampleLe
   ALint processed = 0;
   alGetSourcei(s_AlSource, AL_BUFFERS_PROCESSED, &processed);
   if (processed == 0) {
-    // AL still busy with all queued buffers — discard the oldest jitter frame to
-    // prevent the queue from growing unboundedly; we can't submit right now anyway
+    // AL still busy with all queued buffers — discard the newest jitter frame (back)
+    // to keep the queue at its target depth while preserving the oldest frames that
+    // are next in line for AL submission, avoiding a discontinuity at the playback edge
     if (++s_dropCount <= 3 || s_dropCount % 100 == 0) {
       ClLogMessage("AudDec: no processed buffer, dropping jitter frame #%llu\n",
         (unsigned long long)s_dropCount);
     }
-    s_jitterQueue.pop();
+    s_jitterQueue.pop_back();
     return;
   }
 
@@ -232,7 +233,7 @@ void MoonlightInstance::AudDecDecodeAndPlaySample(char* sampleData, int sampleLe
   size_t dataBytes = frame.size() * sizeof(opus_int16);
   alBufferData(buf, s_alFormat, frame.data(), (ALsizei)dataBytes, s_sampleRate);
   alSourceQueueBuffers(s_AlSource, 1, &buf);
-  s_jitterQueue.pop();
+  s_jitterQueue.pop_front();
 
   // Restart if source stopped due to buffer underrun (silence pool exhausted)
   ALint state;
@@ -250,7 +251,7 @@ void MoonlightInstance::AudDecDecodeAndPlaySample(char* sampleData, int sampleLe
       alBufferData(xbuf, s_alFormat, xf.data(),
         (ALsizei)(xf.size() * sizeof(opus_int16)), s_sampleRate);
       alSourceQueueBuffers(s_AlSource, 1, &xbuf);
-      s_jitterQueue.pop();
+      s_jitterQueue.pop_front();
       extra--;
     }
     ClLogMessage("AudDec: source not playing (state=%d), restarting\n", state);
