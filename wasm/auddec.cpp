@@ -27,6 +27,22 @@ static int s_numBuffers   = 0;  // = s_jitterFrames (AL pool matches jitter dept
 
 // Fixed-capacity ring buffer: one flat allocation of (s_jitterFrames + 1) frames.
 // Eliminates per-frame heap allocation; head/tail indices wrap modulo s_ringCap.
+//
+// Memory layout (s_ringCap = 5 slots shown as example):
+//
+//   slot:   0     1     2     3     4
+//         +-----+-----+-----+-----+-----+
+//         |     | F0  | F1  | F2  |     |
+//         +-----+-----+-----+-----+-----+
+//                  ^                 ^
+//              s_ringHead        s_ringTail
+//           (oldest, next        (next empty
+//            to submit)           write slot)
+//              s_ringSize = 3
+//
+// Indices always wrap modulo s_ringCap so the buffer is used circularly.
+// s_ringTail always points to the next EMPTY slot; the most-recently-written
+// frame lives at (s_ringTail - 1 + s_ringCap) % s_ringCap.
 static std::vector<opus_int16> s_ringBuffer;
 static size_t s_frameElems = 0;  // elements per frame = samplesPerFrame * channelCount
 static int    s_ringHead   = 0;
@@ -34,20 +50,49 @@ static int    s_ringTail   = 0;
 static int    s_ringSize   = 0;
 static int    s_ringCap    = 0;
 
+// Copy one frame into the slot at s_ringTail, then advance tail.
+//
+//   Before: [ F0 | F1 | F2 |    |    ]   size=3
+//                              ^tail
+//   After:  [ F0 | F1 | F2 | F3 |    ]   size=4
+//                                   ^tail
 static inline void ringPushBack(const opus_int16* data) {
   opus_int16* slot = s_ringBuffer.data() + (size_t)s_ringTail * s_frameElems;
   __builtin_memcpy(slot, data, s_frameElems * sizeof(opus_int16));
   s_ringTail = (s_ringTail + 1) % s_ringCap;
   s_ringSize++;
 }
+
+// Discard the oldest frame by advancing head. The slot is not zeroed;
+// it will be overwritten by the next ringPushBack that wraps around to it.
+//
+//   Before: [ F0 | F1 | F2 | F3 |    ]   size=4
+//             ^head
+//   After:  [    | F1 | F2 | F3 |    ]   size=3
+//                  ^head
 static inline void ringPopFront() {
   s_ringHead = (s_ringHead + 1) % s_ringCap;
   s_ringSize--;
 }
+
+// Discard the newest frame by retreating tail one slot.
+// Used when AL has no free buffers and we must drop: preserves the oldest
+// frames queued at head (which are next for AL) and drops the one just arrived.
+//
+//   Before: [ F0 | F1 | F2 | F3 |    ]   size=4
+//                                   ^tail
+//   After:  [ F0 | F1 | F2 |    |    ]   size=3
+//                              ^tail
 static inline void ringPopBack() {
   s_ringTail = (s_ringTail - 1 + s_ringCap) % s_ringCap;
   s_ringSize--;
 }
+
+// Return a pointer to the oldest frame's samples (at s_ringHead) without
+// removing it. The caller passes this directly to alBufferData.
+//
+//   [ F0 | F1 | F2 |    |    ]
+//     ^head → returns pointer here
 static inline const opus_int16* ringFront() {
   return s_ringBuffer.data() + (size_t)s_ringHead * s_frameElems;
 }
