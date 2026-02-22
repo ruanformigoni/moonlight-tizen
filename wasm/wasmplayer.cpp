@@ -9,7 +9,6 @@
 #include <assert.h>
 #include <pthread.h>
 
-#include "samsung/wasm/elementary_audio_track_config.h"
 #include "samsung/wasm/elementary_media_packet.h"
 #include "samsung/wasm/elementary_video_track_config.h"
 #include "samsung/html/html_media_element_listener.h"
@@ -83,29 +82,6 @@ void MoonlightInstance::SourceListener::OnSourceClosed() {
   m_Instance->m_EmssStateChanged.notify_all();
 }
 
-MoonlightInstance::AudioTrackListener::AudioTrackListener(
-  MoonlightInstance* instance
-) : m_Instance(instance) {}
-
-void MoonlightInstance::AudioTrackListener::OnTrackOpen() {
-  ClLogMessage("AUDIO ElementaryMediaTrack::OnTrackOpen\n");
-  std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
-  m_Instance->m_AudioStarted = true;
-  m_Instance->m_EmssAudioStateChanged.notify_all();
-}
-
-void MoonlightInstance::AudioTrackListener::OnTrackClosed(samsung::wasm::ElementaryMediaTrack::CloseReason) {
-  ClLogMessage("AUDIO ElementaryMediaTrack::OnTrackClosed\n");
-  std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
-  m_Instance->m_AudioStarted = false;
-}
-
-void MoonlightInstance::AudioTrackListener::OnSessionIdChanged(samsung::wasm::SessionId new_session_id) {
-  ClLogMessage("AUDIO ElementaryMediaTrack::OnSessionIdChanged\n");
-  std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
-  m_Instance->m_AudioSessionId.store(new_session_id);
-}
-
 MoonlightInstance::VideoTrackListener::VideoTrackListener(
   MoonlightInstance* instance
 ) : m_Instance(instance) {}
@@ -143,50 +119,13 @@ bool MoonlightInstance::InitializeRenderingSurface(int width, int height) {
 }
 
 int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height, int redrawRate, void* context, int drFlags) {
-  // Bind the media source to the media element
+  // --- Video source setup ---
+  ClLogMessage("Video: binding source to element\n");
   g_Instance->m_MediaElement.SetSrc(g_Instance->m_Source.get());
-  ClLogMessage("Waiting to close\n");
-
   g_Instance->WaitFor(&g_Instance->m_EmssStateChanged, [] {
     return g_Instance->m_EmssReadyState == EmssReadyState::kClosed;
   });
-  ClLogMessage("Closed\n");
-
-  {
-    samsung::wasm::ChannelLayout channelLayout; // Selected audio channel layout from audio config
-    switch (CHANNEL_COUNT_FROM_AUDIO_CONFIGURATION(g_Instance->m_AudioConfig)) {
-      case 2:
-        channelLayout = samsung::wasm::ChannelLayout::kStereo; // Audio Channel: Stereo
-        ClLogMessage("Selected channel layout for Stereo audio\n");
-        break;
-      case 6:
-        channelLayout = samsung::wasm::ChannelLayout::k5_1; // Audio Channel: 5.1 Surround Sound
-        ClLogMessage("Selected channel layout for 5.1 Surround audio\n");
-        break;
-      case 8:
-        channelLayout = samsung::wasm::ChannelLayout::k7_1; // Audio Channel: 7.1 Surround Sound
-        ClLogMessage("Selected channel layout for 7.1 Surround audio\n");
-        break;
-      default:
-        ClLogMessage("Unable to select channel layout from audio configuration\n");
-        break;
-    }
-
-    auto add_track_result = g_Instance->m_Source->AddTrack(
-      samsung::wasm::ElementaryAudioTrackConfig {
-        "audio/webm; codecs=\"pcm\"", // Audio Codec: Pulse Code Modulation (PCM) Profile
-        {}, // Extradata: Empty
-        samsung::wasm::DecodingMode::kHardware, // Decoding mode: Hardware
-        samsung::wasm::SampleFormat::kS16, // Sample Format: 16-bit signed integer (S16)
-        channelLayout, // Channel Layout: Stereo (2-CH), 5.1 Surround (6-CH), 7.1 Surround (8-CH)
-        kSampleRate, // Sample Rate: 48 kHz (48000 Hz)
-      }
-    );
-    if (add_track_result) {
-      g_Instance->m_AudioTrack = std::move(*add_track_result);
-      g_Instance->m_AudioTrack.SetListener(&g_Instance->m_AudioTrackListener);
-    }
-  }
+  ClLogMessage("Video: source closed, adding track\n");
 
   {
     const char *mimetype = "video/mp4"; // MIME-type: Video MP4 Container
@@ -238,30 +177,27 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
     }
   }
 
-  ClLogMessage("Inb4 source open\n");
+  ClLogMessage("Video: opening source\n");
   g_Instance->m_Source->Open([](EmssOperationResult){});
   g_Instance->WaitFor(&g_Instance->m_EmssStateChanged, [] {
     return g_Instance->m_EmssReadyState == EmssReadyState::kOpenPending;
   });
 
-  ClLogMessage("Source ready to open\n");
+  ClLogMessage("Video: source ready, calling Play\n");
   g_Instance->m_MediaElement.Play([](EmssOperationResult err) {
     if (err != EmssOperationResult::kSuccess) {
-      ClLogMessage("Play error\n");
+      ClLogMessage("Video: Play error\n");
     } else {
-      ClLogMessage("Play success\n");
+      ClLogMessage("Video: Play success\n");
     }
   });
 
-  ClLogMessage("Waiting to start\n");
-  g_Instance->WaitFor(&g_Instance->m_EmssAudioStateChanged, [] {
-    return g_Instance->m_AudioStarted.load();
-  });
+  ClLogMessage("Waiting for video track to open\n");
   g_Instance->WaitFor(&g_Instance->m_EmssVideoStateChanged, [] {
     return g_Instance->m_VideoStarted.load();
   });
 
-  ClLogMessage("Started\n");
+  ClLogMessage("Video track started\n");
   return 0;
 }
 

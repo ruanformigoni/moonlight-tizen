@@ -45,19 +45,14 @@ MoonlightInstance::MoonlightInstance()
     m_Dispatcher("Curl"),
     m_Mutex(),
     m_EmssStateChanged(),
-    m_EmssAudioStateChanged(),
     m_EmssVideoStateChanged(),
     m_EmssReadyState(EmssReadyState::kDetached),
-    m_AudioStarted(false),
     m_VideoStarted(false),
-    m_AudioSessionId(0),
     m_VideoSessionId(0),
     m_MediaElement("wasm_module"),
     m_Source(nullptr),
     m_SourceListener(this),
-    m_AudioTrackListener(this),
     m_VideoTrackListener(this),
-    m_AudioTrack(),
     m_VideoTrack() {
       m_Dispatcher.start();
     }
@@ -317,7 +312,7 @@ MessageResult MoonlightInstance::StartStream(std::string host, std::string width
   // Manage gamepad input states based on selected settings
   HandleGamepadInputState(rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons);
 
-  // Apply the desired latency mode ​based on the toggle switch state
+  // Video source: latency based on game mode toggle
   EmssLatencyMode selectedLatencyMode = gameMode ? EmssLatencyMode::kUltraLow : EmssLatencyMode::kLow;
   PostToJs(gameMode ? "Selecting the latency mode to: LATENCY_MODE_ULTRA_LOW" : "Selecting the latency mode to: LATENCY_MODE_LOW");
   // Create the media source with the selected latency and rendering modes
