@@ -306,16 +306,18 @@ void MoonlightInstance::AudDecDecodeAndPlaySample(char* sampleData, int sampleLe
   }
 
   // Recycle all processed AL buffers with the oldest jitter frames so AL stays
-  // as full as possible — this closes any gap that opened between calls in one shot
-  while (processed > 0 && s_ringSize > 0) {
-    ALuint buf;
-    alSourceUnqueueBuffers(s_AlSource, 1, &buf);
-    alBufferData(buf, s_alFormat, ringFront(),
+  // as full as possible — this closes any gap that opened between calls in one shot.
+  // Unqueue and re-queue are batched into single calls to minimize WASM→JS crossings:
+  // 3N calls (unqueue×N + bufferData×N + queue×N) become N+2 (1 + bufferData×N + 1).
+  ALint count = (processed < (ALint)s_ringSize) ? processed : (ALint)s_ringSize;
+  ALuint bufs[128];  // processed <= s_numBuffers <= s_jitterFrames, always fits
+  alSourceUnqueueBuffers(s_AlSource, count, bufs);
+  for (ALint i = 0; i < count; i++) {
+    alBufferData(bufs[i], s_alFormat, ringFront(),
       (ALsizei)(s_frameElems * sizeof(opus_int16)), s_sampleRate);
-    alSourceQueueBuffers(s_AlSource, 1, &buf);
     ringPopFront();
-    processed--;
   }
+  alSourceQueueBuffers(s_AlSource, count, bufs);
 
   // Restart if source stopped due to buffer underrun (silence pool exhausted)
   ALint state;
