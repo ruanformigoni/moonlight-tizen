@@ -258,7 +258,7 @@
             <div class="setting-option">
               <label>Audio packet duration</label>
               <span class="mdl-list__item-text-body">
-                - Controls the size of each Opus audio packet sent over the network. Smaller packets reduce latency but increase network overhead. Experiment with higher values if the network is unstable.
+                - Controls the size of each Opus audio packet sent over the network. Smaller packets reduce latency but increase network overhead. Experiment with higher values if the network is unstable. Auto uses 10 ms.
                 <table style="margin: 8px 0 4px 0; border-collapse: collapse; font-size: 0.85em; color: #ccc;">
                   <thead>
                     <tr style="border-bottom: 1px solid #555;">
@@ -303,7 +303,7 @@
             <div class="setting-option">
               <label>Audio jitter buffer</label>
               <span class="mdl-list__item-text-body">
-                - Controls how many decoded audio frames are held before playback. A larger buffer smooths over network gaps but adds audio delay and extends the tail when audio stops on the host.
+                - Controls how many decoded audio frames are held before playback. A larger buffer smooths over network gaps but adds audio delay and extends the tail when audio stops on the host. Auto uses 100 ms.
                 <table style="margin: 8px 0 4px 0; border-collapse: collapse; font-size: 0.85em; color: #ccc;">
                   <thead>
                     <tr style="border-bottom: 1px solid #555;">
