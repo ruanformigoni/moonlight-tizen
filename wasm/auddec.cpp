@@ -1,6 +1,5 @@
 #include "moonlight_wasm.hpp"
 
-#include <deque>
 #include <vector>
 
 #include <AL/al.h>
@@ -26,8 +25,33 @@ extern int g_AudioJitterMsOverride;
 static int s_jitterFrames = 0;  // = ceil(targetJitterMs / frameDurationMs), set at init
 static int s_numBuffers   = 0;  // = s_jitterFrames (AL pool matches jitter depth)
 
-// Software jitter queue: decoded frames sit here before being fed to AL.
-static std::deque<std::vector<opus_int16>> s_jitterQueue;
+// Fixed-capacity ring buffer: one flat allocation of (s_jitterFrames + 1) frames.
+// Eliminates per-frame heap allocation; head/tail indices wrap modulo s_ringCap.
+static std::vector<opus_int16> s_ringBuffer;
+static size_t s_frameElems = 0;  // elements per frame = samplesPerFrame * channelCount
+static int    s_ringHead   = 0;
+static int    s_ringTail   = 0;
+static int    s_ringSize   = 0;
+static int    s_ringCap    = 0;
+
+static inline void ringPushBack(const opus_int16* data) {
+  opus_int16* slot = s_ringBuffer.data() + (size_t)s_ringTail * s_frameElems;
+  __builtin_memcpy(slot, data, s_frameElems * sizeof(opus_int16));
+  s_ringTail = (s_ringTail + 1) % s_ringCap;
+  s_ringSize++;
+}
+static inline void ringPopFront() {
+  s_ringHead = (s_ringHead + 1) % s_ringCap;
+  s_ringSize--;
+}
+static inline void ringPopBack() {
+  s_ringTail = (s_ringTail - 1 + s_ringCap) % s_ringCap;
+  s_ringSize--;
+}
+static inline const opus_int16* ringFront() {
+  return s_ringBuffer.data() + (size_t)s_ringHead * s_frameElems;
+}
+
 static bool     s_jitterReady = false;
 static uint64_t s_dropCount   = 0;
 
@@ -47,8 +71,6 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
     opusConfig->channelCount, opusConfig->samplesPerFrame, opusConfig->sampleRate,
     s_jitterFrames, s_jitterFrames * frameDurationMs, targetJitterMs);
 
-  // Clear any leftover state from a previous session
-  while (!s_jitterQueue.empty()) s_jitterQueue.pop_front();
   s_jitterReady = false;
   s_dropCount   = 0;
 
@@ -107,6 +129,15 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
   // so opus_multistream_decode never writes past the end of the buffer
   s_DecodeBuffer.resize(s_samplesPerFrame * (size_t)opusConfig->channelCount);
 
+  // Allocate ring buffer: capacity is s_jitterFrames + 1 to accommodate the transient
+  // state where a new frame is pushed before the oldest is popped in the same call
+  s_frameElems = s_samplesPerFrame * s_channelCount;
+  s_ringCap    = s_jitterFrames + 1;
+  s_ringBuffer.resize((size_t)s_ringCap * s_frameElems);
+  s_ringHead = 0;
+  s_ringTail = 0;
+  s_ringSize = 0;
+
   // Create AL buffers and source
   s_AlBuffers.resize(s_numBuffers);
   alGenBuffers(s_numBuffers, s_AlBuffers.data());
@@ -144,7 +175,12 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
 void MoonlightInstance::AudDecCleanup(void) {
   ClLogMessage("AudDecCleanup\n");
 
-  while (!s_jitterQueue.empty()) s_jitterQueue.pop_front();
+  s_ringBuffer.clear();
+  s_ringBuffer.shrink_to_fit();
+  s_ringHead = 0;
+  s_ringTail = 0;
+  s_ringSize = 0;
+  s_ringCap  = 0;
 
   if (s_AlSource) {
     alSourceStop(s_AlSource);
@@ -193,13 +229,11 @@ void MoonlightInstance::AudDecDecodeAndPlaySample(char* sampleData, int sampleLe
     return;
   }
 
-  // Push decoded frame into jitter queue
-  size_t frameElems = (size_t)decodeLen * s_channelCount;
-  s_jitterQueue.push_back(std::vector<opus_int16>(
-    s_DecodeBuffer.data(), s_DecodeBuffer.data() + frameElems));
+  // Push decoded frame into ring buffer
+  ringPushBack(s_DecodeBuffer.data());
 
   // Accumulate until the jitter buffer is full before feeding AL
-  if ((int)s_jitterQueue.size() < s_jitterFrames) {
+  if (s_ringSize < s_jitterFrames) {
     return;
   }
 
@@ -222,20 +256,19 @@ void MoonlightInstance::AudDecDecodeAndPlaySample(char* sampleData, int sampleLe
       ClLogMessage("AudDec: no processed buffer, dropping jitter frame #%llu\n",
         (unsigned long long)s_dropCount);
     }
-    s_jitterQueue.pop_back();
+    ringPopBack();
     return;
   }
 
   // Recycle all processed AL buffers with the oldest jitter frames so AL stays
   // as full as possible — this closes any gap that opened between calls in one shot
-  while (processed > 0 && !s_jitterQueue.empty()) {
-    const std::vector<opus_int16>& frame = s_jitterQueue.front();
+  while (processed > 0 && s_ringSize > 0) {
     ALuint buf;
     alSourceUnqueueBuffers(s_AlSource, 1, &buf);
-    alBufferData(buf, s_alFormat, frame.data(),
-      (ALsizei)(frame.size() * sizeof(opus_int16)), s_sampleRate);
+    alBufferData(buf, s_alFormat, ringFront(),
+      (ALsizei)(s_frameElems * sizeof(opus_int16)), s_sampleRate);
     alSourceQueueBuffers(s_AlSource, 1, &buf);
-    s_jitterQueue.pop_front();
+    ringPopFront();
     processed--;
   }
 
