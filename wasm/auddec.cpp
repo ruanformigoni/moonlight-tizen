@@ -21,8 +21,9 @@ static std::vector<opus_int16> s_DecodeBuffer;
 // Target jitter protection in wall-clock ms. Both the jitter queue depth and the AL
 // buffer pool size are computed from this at AudDecInit time so they scale correctly
 // regardless of the negotiated AudioPacketDuration (5 / 10 / 20 ms frames).
-static constexpr int kTargetJitterMs = 200;
-static int s_jitterFrames = 0;  // = ceil(kTargetJitterMs / frameDurationMs), set at init
+// Overridden at session start by g_AudioJitterMsOverride (0 = use default of 100 ms).
+extern int g_AudioJitterMsOverride;
+static int s_jitterFrames = 0;  // = ceil(targetJitterMs / frameDurationMs), set at init
 static int s_numBuffers   = 0;  // = s_jitterFrames (AL pool matches jitter depth)
 
 // Software jitter queue: decoded frames sit here before being fed to AL.
@@ -35,15 +36,16 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
   s_samplesPerFrame = (size_t)opusConfig->samplesPerFrame;
   s_sampleRate      = (ALsizei)opusConfig->sampleRate;
 
-  // Compute frame count needed to cover kTargetJitterMs (ceiling division)
-  s_jitterFrames = (kTargetJitterMs * (int)s_sampleRate + (int)s_samplesPerFrame * 1000 - 1)
+  // Compute frame count needed to cover targetJitterMs (ceiling division)
+  int targetJitterMs = (g_AudioJitterMsOverride != 0) ? g_AudioJitterMsOverride : 100;
+  s_jitterFrames = (targetJitterMs * (int)s_sampleRate + (int)s_samplesPerFrame * 1000 - 1)
                    / ((int)s_samplesPerFrame * 1000);
   s_numBuffers = s_jitterFrames;
 
   int frameDurationMs = (int)s_samplesPerFrame * 1000 / (int)s_sampleRate;
-  ClLogMessage("AudDecInit: ch=%d samplesPerFrame=%d sampleRate=%d jitterFrames=%d jitterMs=%d\n",
+  ClLogMessage("AudDecInit: ch=%d samplesPerFrame=%d sampleRate=%d jitterFrames=%d jitterMs=%d (target=%dms)\n",
     opusConfig->channelCount, opusConfig->samplesPerFrame, opusConfig->sampleRate,
-    s_jitterFrames, s_jitterFrames * frameDurationMs);
+    s_jitterFrames, s_jitterFrames * frameDurationMs, targetJitterMs);
 
   // Clear any leftover state from a previous session
   while (!s_jitterQueue.empty()) s_jitterQueue.pop();

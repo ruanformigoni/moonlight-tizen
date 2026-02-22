@@ -48,6 +48,7 @@ function attachListeners() {
   $('#flipXYfaceButtonsSwitch').on('click', saveFlipXYfaceButtons);
   $('.audioConfigMenu li').on('click', saveAudioConfiguration);
   $('.audioPacketDurationMenu li').on('click', saveAudioPacketDuration);
+  $('.audioJitterMenu li').on('click', saveAudioJitterMs);
   $('#playHostAudioSwitch').on('click', savePlayHostAudio);
   $('.videoCodecMenu li').on('click', saveVideoCodec);
   $('#hdrModeSwitch').on('click', saveHdrMode);
@@ -75,6 +76,7 @@ function attachListeners() {
   registerMenu('selectBitrate', Views.SelectBitrateMenu);
   registerMenu('selectAudio', Views.SelectAudioMenu);
   registerMenu('selectAudioPacketDuration', Views.SelectAudioPacketDurationMenu);
+  registerMenu('selectAudioJitter', Views.SelectAudioJitterMenu);
   registerMenu('selectCodec', Views.SelectCodecMenu);
 
   $(window).resize(fullscreenWasmModule);
@@ -2144,6 +2146,7 @@ function startGame(host, appID) {
       const flipXYfaceButtons = $('#flipXYfaceButtonsSwitch').parent().hasClass('is-checked') ? 1 : 0;
       var audioConfig = $('#selectAudio').data('value').toString();
       const audioPacketDuration = parseInt($('#selectAudioPacketDuration').data('value')) || 0;
+      const audioJitterMs = parseInt($('#selectAudioJitter').data('value')) || 0;
       const playHostAudio = $('#playHostAudioSwitch').parent().hasClass('is-checked') ? 1 : 0;
       var videoCodec = $('#selectCodec').data('value').toString();
       const hdrMode = $('#hdrModeSwitch').parent().hasClass('is-checked') ? 1 : 0;
@@ -2165,7 +2168,8 @@ function startGame(host, appID) {
       '\n Flip X/Y face buttons: ' + flipXYfaceButtons + 
       '\n Audio configuration: ' + audioConfig + 
       '\n Audio packet duration: ' + audioPacketDuration +
-      '\n Play host audio: ' + playHostAudio + 
+      '\n Audio jitter buffer: ' + audioJitterMs +
+      '\n Play host audio: ' + playHostAudio +
       '\n Video codec: ' + videoCodec + 
       '\n Video HDR mode: ' + hdrMode + 
       '\n Full color range: ' + fullRange + 
@@ -2213,7 +2217,7 @@ function startGame(host, appID) {
             host.address, streamWidth, streamHeight, frameRate, bitrate.toString(), rikey, rikeyid.toString(),
             host.appVersion, host.gfeVersion, $root.find('sessionUrl0').text().trim(), host.serverCodecModeSupport,
             framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons,
-            audioConfig, audioPacketDuration, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
+            audioConfig, audioPacketDuration, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
             performanceStats
           ]);
         }, function(failedResumeApp) {
@@ -2267,7 +2271,7 @@ function startGame(host, appID) {
           host.address, streamWidth, streamHeight, frameRate, bitrate.toString(), rikey, rikeyid.toString(),
           host.appVersion, host.gfeVersion, $root.find('sessionUrl0').text().trim(), host.serverCodecModeSupport,
           framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons,
-          audioConfig, audioPacketDuration, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
+          audioConfig, audioPacketDuration, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
           performanceStats
         ]);
       }, function(failedLaunchApp) {
@@ -2713,6 +2717,14 @@ function saveAudioPacketDuration() {
   storeData('audioPacketDuration', chosenValue, null);
 }
 
+function saveAudioJitterMs() {
+  const chosenValue = parseInt($(this).data('value')) || 0;
+  const chosenLabel = $(this).text();
+  $('#selectAudioJitter').text(chosenLabel).data('value', chosenValue);
+  console.log('%c[index.js, saveAudioJitterMs]', 'color: green;', 'Saving audio jitter buffer: ' + chosenValue);
+  storeData('audioJitterMs', chosenValue, null);
+}
+
 function savePlayHostAudio() {
   setTimeout(() => {
     const chosenPlayHostAudio = $('#playHostAudioSwitch').parent().hasClass('is-checked');
@@ -2946,6 +2958,10 @@ function restoreDefaultsSettingsValues() {
   const defaultAudioPacketDuration = 0;
   $('#selectAudioPacketDuration').text('Auto').data('value', defaultAudioPacketDuration);
   storeData('audioPacketDuration', defaultAudioPacketDuration, null);
+
+  const defaultAudioJitterMs = 0;
+  $('#selectAudioJitter').text('Auto').data('value', defaultAudioJitterMs);
+  storeData('audioJitterMs', defaultAudioJitterMs, null);
 
   const defaultPlayHostAudio = false;
   document.querySelector('#playHostAudioBtn').MaterialSwitch.off();
@@ -3233,6 +3249,14 @@ function loadUserDataCb() {
     const labelMap = { 0: 'Auto', 5: '5 ms', 10: '10 ms', 20: '20 ms' };
     const label = labelMap[val] || 'Auto';
     $('#selectAudioPacketDuration').text(label).data('value', val);
+  });
+
+  console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored audioJitterMs preferences.');
+  getData('audioJitterMs', function(previousValue) {
+    const val = (previousValue.audioJitterMs != null) ? previousValue.audioJitterMs : 0;
+    const labelMap = { 0: 'Auto', 100: '100 ms', 200: '200 ms', 400: '400 ms' };
+    const label = labelMap[val] || 'Auto';
+    $('#selectAudioJitter').text(label).data('value', val);
   });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored playHostAudio preferences.');

@@ -948,6 +948,7 @@ const Views = {
     view: new ListView(() => [
       'selectAudio',
       'selectAudioPacketDuration',
+      'selectAudioJitter',
       'playHostAudioBtn'
     ]),
     up: function() {
@@ -983,6 +984,43 @@ const Views = {
     switch: function() {
       document.getElementById(this.view.current()).focus();
     },
+    enter: function() {
+      mark(this.view.current());
+    },
+    leave: function() {
+      unmark(this.view.current());
+    },
+  },
+  SelectAudioJitterMenu: {
+    isActive: () => isPopupActive('audioJitterMenu'),
+    view: new ListView(() =>
+      document.getElementById('audioJitterMenu')
+      .parentNode.children[3].children[1].children),
+    up: function() {
+      this.view.prevOption();
+      document.getElementById(this.view.current()).focus();
+    },
+    down: function() {
+      this.view.nextOption();
+      document.getElementById(this.view.current()).focus();
+    },
+    left: function() {},
+    right: function() {},
+    select: function() {
+      this.view.current().click();
+      document.getElementById('selectAudioJitter').focus();
+    },
+    accept: function() {
+      this.view.current().click();
+      Navigation.pop();
+      document.getElementById('selectAudioJitter').focus();
+    },
+    back: function() {
+      document.getElementById('selectAudioJitter').click();
+      document.getElementById('selectAudioJitter').focus();
+    },
+    press: function() {},
+    switch: function() {},
     enter: function() {
       mark(this.view.current());
     },

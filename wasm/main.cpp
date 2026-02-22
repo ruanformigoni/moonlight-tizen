@@ -36,6 +36,10 @@ MoonlightInstance* g_Instance;
 // Set from StartStream before LiStartConnection; read by SdpGenerator.c via extern.
 int g_AudioPacketDurationOverride = 0;
 
+// Audio jitter buffer target in ms: 0 = use default (100 ms), else 50/100/200/400.
+// Set from StartStream before LiStartConnection; read by auddec.cpp via extern.
+int g_AudioJitterMsOverride = 0;
+
 MoonlightInstance::MoonlightInstance()
   : m_OpusDecoder(NULL),
     m_MouseLocked(false),
@@ -186,6 +190,9 @@ void* MoonlightInstance::ConnectionThreadFunc(void* context) {
   // Apply user-selected audio packet duration override (0 = let SdpGenerator decide)
   g_AudioPacketDurationOverride = me->m_AudioPacketDuration;
 
+  // Apply user-selected jitter buffer target (0 = use default of 100 ms)
+  g_AudioJitterMsOverride = me->m_AudioJitterMs;
+
   err = LiStartConnection(&serverInfo, &me->m_StreamConfig, &MoonlightInstance::s_ClCallbacks,
     &MoonlightInstance::s_DrCallbacks, &MoonlightInstance::s_ArCallbacks, NULL, 0, NULL, 0);
   if (err != 0) {
@@ -212,7 +219,7 @@ static void HexStringToBytes(const char* str, char* output) {
 MessageResult MoonlightInstance::StartStream(std::string host, std::string width, std::string height, std::string fps, std::string bitrate,
   std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
-  std::string audioConfig, int audioPacketDuration, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
+  std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
   bool disableWarnings, bool performanceStats) {
   PostToJs("Setting the Host address to: " + host);
   PostToJs("Setting the Video resolution to: " + width + "x" + height);
@@ -232,6 +239,7 @@ MessageResult MoonlightInstance::StartStream(std::string host, std::string width
   PostToJs("Setting the Flip X/Y face buttons to: " + std::to_string(flipXYfaceButtons));
   PostToJs("Setting the Audio configuration to: " + audioConfig);
   PostToJs("Setting the Audio packet duration to: " + (audioPacketDuration ? std::to_string(audioPacketDuration) + " ms" : "auto"));
+  PostToJs("Setting the Audio jitter buffer to: " + (audioJitterMs ? std::to_string(audioJitterMs) + " ms" : "auto (100 ms)"));
   PostToJs("Setting the Play host audio to: " + std::to_string(playHostAudio));
   PostToJs("Setting the Video codec to: " + videoCodec);
   PostToJs("Setting the Video HDR mode to: " + std::to_string(hdrMode));
@@ -343,6 +351,7 @@ MessageResult MoonlightInstance::StartStream(std::string host, std::string width
   m_FlipABfaceButtonsEnabled = flipABfaceButtons;
   m_FlipXYfaceButtonsEnabled = flipXYfaceButtons;
   m_AudioPacketDuration = audioPacketDuration;
+  m_AudioJitterMs = audioJitterMs;
   m_PlayHostAudioEnabled = playHostAudio;
   m_HdrModeEnabled = hdrMode;
   m_FullRangeEnabled = fullRange;
@@ -489,12 +498,12 @@ int main(int argc, char** argv) {
 MessageResult startStream(std::string host, std::string width, std::string height, std::string fps, std::string bitrate,
   std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
-  std::string audioConfig, int audioPacketDuration, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
+  std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
   bool disableWarnings, bool performanceStats) {
   PostToJs("Starting the streaming session...");
   return g_Instance->StartStream(host, width, height, fps, bitrate, rikey, rikeyid, appversion, gfeversion, rtspurl, serverCodecModeSupport,
   framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons, audioConfig,
-  audioPacketDuration, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings, performanceStats);
+  audioPacketDuration, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings, performanceStats);
 }
 
 MessageResult stopStream() {
