@@ -1,5 +1,8 @@
 #include "Limelight-internal.h"
 
+// Defined in main.cpp; non-zero value overrides the auto-selected AudioPacketDuration.
+extern int g_AudioPacketDurationOverride;
+
 #define MAX_OPTION_NAME_LEN 128
 
 #define MAX_SDP_HEADER_LEN 128
@@ -516,6 +519,11 @@ static PSDP_OPTION getAttributesList(char*urlSafeAddr) {
                 // Use 5 ms packets by default for lowest latency
                 AudioPacketDuration = 5;
             }
+        }
+
+        // Allow the application layer to override the auto-selected duration
+        if (g_AudioPacketDurationOverride != 0) {
+            AudioPacketDuration = g_AudioPacketDurationOverride;
         }
 
         snprintf(payloadStr, sizeof(payloadStr), "%d", AudioPacketDuration);

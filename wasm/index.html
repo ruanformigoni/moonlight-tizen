@@ -256,16 +256,49 @@
               </ul>
             </div>
             <div class="setting-option">
-              <label>Audio synchronization</label>
+              <label>Audio packet duration</label>
               <span class="mdl-list__item-text-body">
-                - This can help reduce delays by keeping audio in sync for a consistent sound while streaming.
+                - Controls the size of each Opus audio packet sent over the network. Smaller packets reduce latency but increase network overhead. Experiment with higher values if the network is unstable.
+                <table style="margin: 8px 0 4px 0; border-collapse: collapse; font-size: 0.85em; color: #ccc;">
+                  <thead>
+                    <tr style="border-bottom: 1px solid #555;">
+                      <th style="padding: 4px 12px 4px 0; text-align: left;">Duration</th>
+                      <th style="padding: 4px 12px 4px 0; text-align: left;">Frame size</th>
+                      <th style="padding: 4px 12px 4px 0; text-align: left;">Jitter buffer</th>
+                      <th style="padding: 4px 0; text-align: left;">Network packets</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style="padding: 3px 12px 3px 0;">20 ms</td>
+                      <td style="padding: 3px 12px 3px 0;">960 samples</td>
+                      <td style="padding: 3px 12px 3px 0;">10 frames</td>
+                      <td style="padding: 3px 0;">~75/sec</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 3px 12px 3px 0;">10 ms</td>
+                      <td style="padding: 3px 12px 3px 0;">480 samples</td>
+                      <td style="padding: 3px 12px 3px 0;">20 frames</td>
+                      <td style="padding: 3px 0;">~150/sec</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 3px 12px 3px 0;">5 ms</td>
+                      <td style="padding: 3px 12px 3px 0;">240 samples</td>
+                      <td style="padding: 3px 12px 3px 0;">40 frames</td>
+                      <td style="padding: 3px 0;">~300/sec</td>
+                    </tr>
+                  </tbody>
+                </table>
               </span>
-              <div id="audioSyncMenu">
-                <label id="audioSyncBtn" class="mdl-switch mdl-js-switch mdl-js-ripple-effect" for="audioSyncSwitch">
-                  <input type="checkbox" id="audioSyncSwitch" class="mdl-switch__input">
-                  <span class="mdl-switch__label">Allow audio synchronization support for optimal sound output</span>
-                </label>
+              <div id="audioPacketDurationMenu">
+                <button type="button" id="selectAudioPacketDuration" class="mdl-button mdl-js-button mdl-js-ripple-effect" data-value="0">Auto</button>
               </div>
+              <ul class="audioPacketDurationMenu mdl-menu mdl-menu--bottom-left mdl-js-menu mdl-js-ripple-effect" for="selectAudioPacketDuration">
+                <li class="mdl-menu__item" data-value="0">Auto</li>
+                <li class="mdl-menu__item" data-value="5">5 ms</li>
+                <li class="mdl-menu__item" data-value="10">10 ms</li>
+                <li class="mdl-menu__item" data-value="20">20 ms</li>
+              </ul>
             </div>
             <div class="setting-option">
               <label>Play audio on host</label>

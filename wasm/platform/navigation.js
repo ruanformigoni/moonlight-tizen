@@ -947,7 +947,7 @@ const Views = {
   AudioSettings: {
     view: new ListView(() => [
       'selectAudio',
-      'audioSyncBtn',
+      'selectAudioPacketDuration',
       'playHostAudioBtn'
     ]),
     up: function() {
@@ -990,9 +990,46 @@ const Views = {
       unmark(this.view.current());
     },
   },
+  SelectAudioPacketDurationMenu: {
+    isActive: () => isPopupActive('audioPacketDurationMenu'),
+    view: new ListView(() =>
+      document.getElementById('audioPacketDurationMenu')
+      .parentNode.children[3].children[1].children),
+    up: function() {
+      this.view.prevOption();
+      document.getElementById(this.view.current()).focus();
+    },
+    down: function() {
+      this.view.nextOption();
+      document.getElementById(this.view.current()).focus();
+    },
+    left: function() {},
+    right: function() {},
+    select: function() {
+      this.view.current().click();
+      document.getElementById('selectAudioPacketDuration').focus();
+    },
+    accept: function() {
+      this.view.current().click();
+      Navigation.pop();
+      document.getElementById('selectAudioPacketDuration').focus();
+    },
+    back: function() {
+      document.getElementById('selectAudioPacketDuration').click();
+      document.getElementById('selectAudioPacketDuration').focus();
+    },
+    press: function() {},
+    switch: function() {},
+    enter: function() {
+      mark(this.view.current());
+    },
+    leave: function() {
+      unmark(this.view.current());
+    },
+  },
   SelectAudioMenu: {
     isActive: () => isPopupActive('audioConfigMenu'),
-    view: new ListView(() => 
+    view: new ListView(() =>
       document.getElementById('audioConfigMenu')
       .parentNode.children[3].children[1].children),
     up: function() {

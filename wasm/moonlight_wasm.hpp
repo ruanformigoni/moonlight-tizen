@@ -91,7 +91,7 @@ class MoonlightInstance {
   MessageResult StartStream(std::string host, std::string width, std::string height, std::string fps, std::string bitrate,
     std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
     bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
-    std::string audioConfig, bool audioSync, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
+    std::string audioConfig, int audioPacketDuration, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
     bool disableWarnings, bool performanceStats);
   MessageResult StopStream();
 
@@ -216,7 +216,7 @@ class MoonlightInstance {
   bool m_FlipABfaceButtonsEnabled;
   bool m_FlipXYfaceButtonsEnabled;
   int m_AudioConfig;
-  bool m_AudioSyncEnabled;
+  int m_AudioPacketDuration;
   bool m_PlayHostAudioEnabled;
   bool m_HdrModeEnabled;
   bool m_FullRangeEnabled;
@@ -274,7 +274,7 @@ void openUrl(int callbackId, std::string url, emscripten::val ppk, bool binaryRe
 MessageResult startStream(std::string host, std::string width, std::string height, std::string fps, std::string bitrate,
   std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
-  std::string audioConfig, bool audioSync, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
+  std::string audioConfig, int audioPacketDuration, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
   bool disableWarnings, bool performanceStats);
 MessageResult stopStream();
 

@@ -47,7 +47,7 @@ function attachListeners() {
   $('#flipABfaceButtonsSwitch').on('click', saveFlipABfaceButtons);
   $('#flipXYfaceButtonsSwitch').on('click', saveFlipXYfaceButtons);
   $('.audioConfigMenu li').on('click', saveAudioConfiguration);
-  $('#audioSyncSwitch').on('click', saveAudioSync);
+  $('.audioPacketDurationMenu li').on('click', saveAudioPacketDuration);
   $('#playHostAudioSwitch').on('click', savePlayHostAudio);
   $('.videoCodecMenu li').on('click', saveVideoCodec);
   $('#hdrModeSwitch').on('click', saveHdrMode);
@@ -74,6 +74,7 @@ function attachListeners() {
   registerMenu('selectFramerate', Views.SelectFramerateMenu);
   registerMenu('selectBitrate', Views.SelectBitrateMenu);
   registerMenu('selectAudio', Views.SelectAudioMenu);
+  registerMenu('selectAudioPacketDuration', Views.SelectAudioPacketDurationMenu);
   registerMenu('selectCodec', Views.SelectCodecMenu);
 
   $(window).resize(fullscreenWasmModule);
@@ -2142,7 +2143,7 @@ function startGame(host, appID) {
       const flipABfaceButtons = $('#flipABfaceButtonsSwitch').parent().hasClass('is-checked') ? 1 : 0;
       const flipXYfaceButtons = $('#flipXYfaceButtonsSwitch').parent().hasClass('is-checked') ? 1 : 0;
       var audioConfig = $('#selectAudio').data('value').toString();
-      const audioSync = $('#audioSyncSwitch').parent().hasClass('is-checked') ? 1 : 0;
+      const audioPacketDuration = parseInt($('#selectAudioPacketDuration').data('value')) || 0;
       const playHostAudio = $('#playHostAudioSwitch').parent().hasClass('is-checked') ? 1 : 0;
       var videoCodec = $('#selectCodec').data('value').toString();
       const hdrMode = $('#hdrModeSwitch').parent().hasClass('is-checked') ? 1 : 0;
@@ -2163,7 +2164,7 @@ function startGame(host, appID) {
       '\n Flip A/B face buttons: ' + flipABfaceButtons + 
       '\n Flip X/Y face buttons: ' + flipXYfaceButtons + 
       '\n Audio configuration: ' + audioConfig + 
-      '\n Audio synchronization: ' + audioSync + 
+      '\n Audio packet duration: ' + audioPacketDuration +
       '\n Play host audio: ' + playHostAudio + 
       '\n Video codec: ' + videoCodec + 
       '\n Video HDR mode: ' + hdrMode + 
@@ -2212,7 +2213,7 @@ function startGame(host, appID) {
             host.address, streamWidth, streamHeight, frameRate, bitrate.toString(), rikey, rikeyid.toString(),
             host.appVersion, host.gfeVersion, $root.find('sessionUrl0').text().trim(), host.serverCodecModeSupport,
             framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons,
-            audioConfig, audioSync, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
+            audioConfig, audioPacketDuration, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
             performanceStats
           ]);
         }, function(failedResumeApp) {
@@ -2266,7 +2267,7 @@ function startGame(host, appID) {
           host.address, streamWidth, streamHeight, frameRate, bitrate.toString(), rikey, rikeyid.toString(),
           host.appVersion, host.gfeVersion, $root.find('sessionUrl0').text().trim(), host.serverCodecModeSupport,
           framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons,
-          audioConfig, audioSync, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
+          audioConfig, audioPacketDuration, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
           performanceStats
         ]);
       }, function(failedLaunchApp) {
@@ -2704,12 +2705,12 @@ function warnAudioConfiguration() {
   }
 }
 
-function saveAudioSync() {
-  setTimeout(() => {
-    const chosenAudioSync = $('#audioSyncSwitch').parent().hasClass('is-checked');
-    console.log('%c[index.js, saveAudioSync]', 'color: green;', 'Saving audio sync state: ' + chosenAudioSync);
-    storeData('audioSync', chosenAudioSync, null);
-  }, 100);
+function saveAudioPacketDuration() {
+  const chosenValue = parseInt($(this).data('value')) || 0;
+  const chosenLabel = $(this).text();
+  $('#selectAudioPacketDuration').text(chosenLabel).data('value', chosenValue);
+  console.log('%c[index.js, saveAudioPacketDuration]', 'color: green;', 'Saving audio packet duration: ' + chosenValue);
+  storeData('audioPacketDuration', chosenValue, null);
 }
 
 function savePlayHostAudio() {
@@ -2942,9 +2943,9 @@ function restoreDefaultsSettingsValues() {
   $('#selectAudio').text('Stereo').data('value', defaultAudioConfig);
   storeData('audioConfig', defaultAudioConfig, null);
 
-  const defaultAudioSync = false;
-  document.querySelector('#audioSyncBtn').MaterialSwitch.off();
-  storeData('audioSync', defaultAudioSync, null);
+  const defaultAudioPacketDuration = 0;
+  $('#selectAudioPacketDuration').text('Auto').data('value', defaultAudioPacketDuration);
+  storeData('audioPacketDuration', defaultAudioPacketDuration, null);
 
   const defaultPlayHostAudio = false;
   document.querySelector('#playHostAudioBtn').MaterialSwitch.off();
@@ -3226,15 +3227,12 @@ function loadUserDataCb() {
     }
   });
 
-  console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored audioSync preferences.');
-  getData('audioSync', function(previousValue) {
-    if (previousValue.audioSync == null) {
-      document.querySelector('#audioSyncBtn').MaterialSwitch.off(); // Set the default state
-    } else if (previousValue.audioSync == false) {
-      document.querySelector('#audioSyncBtn').MaterialSwitch.off();
-    } else {
-      document.querySelector('#audioSyncBtn').MaterialSwitch.on();
-    }
+  console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored audioPacketDuration preferences.');
+  getData('audioPacketDuration', function(previousValue) {
+    const val = (previousValue.audioPacketDuration != null) ? previousValue.audioPacketDuration : 0;
+    const labelMap = { 0: 'Auto', 5: '5 ms', 10: '10 ms', 20: '20 ms' };
+    const label = labelMap[val] || 'Auto';
+    $('#selectAudioPacketDuration').text(label).data('value', val);
   });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored playHostAudio preferences.');
