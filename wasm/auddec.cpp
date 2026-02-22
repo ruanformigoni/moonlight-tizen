@@ -226,34 +226,23 @@ void MoonlightInstance::AudDecDecodeAndPlaySample(char* sampleData, int sampleLe
     return;
   }
 
-  // Recycle one processed AL buffer with the oldest jitter frame
-  const std::vector<opus_int16>& frame = s_jitterQueue.front();
-  ALuint buf;
-  alSourceUnqueueBuffers(s_AlSource, 1, &buf);
-  size_t dataBytes = frame.size() * sizeof(opus_int16);
-  alBufferData(buf, s_alFormat, frame.data(), (ALsizei)dataBytes, s_sampleRate);
-  alSourceQueueBuffers(s_AlSource, 1, &buf);
-  s_jitterQueue.pop_front();
+  // Recycle all processed AL buffers with the oldest jitter frames so AL stays
+  // as full as possible — this closes any gap that opened between calls in one shot
+  while (processed > 0 && !s_jitterQueue.empty()) {
+    const std::vector<opus_int16>& frame = s_jitterQueue.front();
+    ALuint buf;
+    alSourceUnqueueBuffers(s_AlSource, 1, &buf);
+    alBufferData(buf, s_alFormat, frame.data(),
+      (ALsizei)(frame.size() * sizeof(opus_int16)), s_sampleRate);
+    alSourceQueueBuffers(s_AlSource, 1, &buf);
+    s_jitterQueue.pop_front();
+    processed--;
+  }
 
   // Restart if source stopped due to buffer underrun (silence pool exhausted)
   ALint state;
   alGetSourcei(s_AlSource, AL_SOURCE_STATE, &state);
   if (state != AL_PLAYING) {
-    // Drain extra jitter frames into any remaining processed AL slots so the
-    // source has more runway before it needs the next call — prevents immediate
-    // re-stop and drops right after restart
-    ALint extra = 0;
-    alGetSourcei(s_AlSource, AL_BUFFERS_PROCESSED, &extra);
-    while (extra > 0 && !s_jitterQueue.empty()) {
-      const std::vector<opus_int16>& xf = s_jitterQueue.front();
-      ALuint xbuf;
-      alSourceUnqueueBuffers(s_AlSource, 1, &xbuf);
-      alBufferData(xbuf, s_alFormat, xf.data(),
-        (ALsizei)(xf.size() * sizeof(opus_int16)), s_sampleRate);
-      alSourceQueueBuffers(s_AlSource, 1, &xbuf);
-      s_jitterQueue.pop_front();
-      extra--;
-    }
     ClLogMessage("AudDec: source not playing (state=%d), restarting\n", state);
     alSourcePlay(s_AlSource);
   }
