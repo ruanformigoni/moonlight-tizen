@@ -98,6 +98,10 @@ int notifyAudioPortNegotiationComplete(void) {
         return LastSocketFail();
     }
 
+    // Record the time the socket was bound so the receive thread can compute
+    // how long packets have been accumulating in the OS buffer and drop them.
+    firstReceiveTime = PltGetMillis();
+
     // We may receive audio before our threads are started, but that's okay. We'll
     // drop the first 1 second of audio packets to catch up with the backlog.
     int err = PltCreateThread("AudioPing", AudioPingThreadProc, NULL, &udpPingThread);
@@ -311,6 +315,9 @@ static void AudioReceiveThreadProc(void* context) {
             // Only count actual audio data (not FEC) in the packets to drop calculation
             if (rtp->packetType == 97) {
                 packetsToDrop--;
+                if (packetsToDrop == 0) {
+                    Limelog("Audio: initial drop complete, first real packet passing through\n");
+                }
             }
             continue;
         }
