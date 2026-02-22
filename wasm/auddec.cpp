@@ -310,14 +310,27 @@ void MoonlightInstance::AudDecDecodeAndPlaySample(char* sampleData, int sampleLe
   // Unqueue and re-queue are batched into single calls to minimize WASM→JS crossings:
   // 3N calls (unqueue×N + bufferData×N + queue×N) become N+2 (1 + bufferData×N + 1).
   ALint count = (processed < (ALint)s_ringSize) ? processed : (ALint)s_ringSize;
+  ALint plcCount = processed - count;  // slots ring can't fill — lost packets
   ALuint bufs[128];  // processed <= s_numBuffers <= s_jitterFrames, always fits
-  alSourceUnqueueBuffers(s_AlSource, count, bufs);
+  alSourceUnqueueBuffers(s_AlSource, processed, bufs);
   for (ALint i = 0; i < count; i++) {
     alBufferData(bufs[i], s_alFormat, ringFront(),
       (ALsizei)(s_frameElems * sizeof(opus_int16)), s_sampleRate);
     ringPopFront();
   }
-  alSourceQueueBuffers(s_AlSource, count, bufs);
+  // Fill any remaining slots with Opus PLC frames (packet loss concealment).
+  // Decoding with NULL data synthesizes a smooth continuation of the last signal
+  // rather than leaving AL buffer slots empty and causing an underrun.
+  if (plcCount > 0) {
+    ClLogMessage("AudDec: %d lost packet(s), filling with PLC\n", (int)plcCount);
+    for (ALint i = count; i < processed; i++) {
+      opus_multistream_decode(g_Instance->m_OpusDecoder,
+        nullptr, 0, s_DecodeBuffer.data(), (int)s_samplesPerFrame, 0);
+      alBufferData(bufs[i], s_alFormat, s_DecodeBuffer.data(),
+        (ALsizei)(s_frameElems * sizeof(opus_int16)), s_sampleRate);
+    }
+  }
+  alSourceQueueBuffers(s_AlSource, processed, bufs);
 
   // Restart if source stopped due to buffer underrun (silence pool exhausted)
   ALint state;
