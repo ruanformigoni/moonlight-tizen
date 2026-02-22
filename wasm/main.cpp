@@ -187,8 +187,8 @@ void* MoonlightInstance::ConnectionThreadFunc(void* context) {
     PostToJs("Selecting the fallback server code mode to: SCM_H264");
   }
 
-  // Apply user-selected audio packet duration override (0 = let SdpGenerator decide)
-  g_AudioPacketDurationOverride = me->m_AudioPacketDuration;
+  // Apply user-selected audio packet duration override (0 = auto → default 10 ms)
+  g_AudioPacketDurationOverride = me->m_AudioPacketDuration != 0 ? me->m_AudioPacketDuration : 10;
 
   // Apply user-selected jitter buffer target (0 = use default of 100 ms)
   g_AudioJitterMsOverride = me->m_AudioJitterMs;
