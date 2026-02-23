@@ -97,6 +97,32 @@ static inline const opus_int16* ringFront() {
   return s_ringBuffer.data() + (size_t)s_ringHead * s_frameElems;
 }
 
+// Fill `total` AL buffer handles with real PCM frames from the ring (up to
+// `total`) and PLC for any shortfall, then queue them all to the AL source.
+static void fillAndQueueBuffers(ALuint* bufs, ALint total,
+                                std::vector<opus_int16>& decodeBuf,
+                                uint64_t& plcTotal) {
+  ALint count    = ((ALint)s_ringSize < total) ? (ALint)s_ringSize : total;
+  ALint plcCount = total - count;
+  ALsizei frameBytes = (ALsizei)(s_frameElems * sizeof(opus_int16));
+
+  for (ALint i = 0; i < count; i++) {
+    alBufferData(bufs[i], s_alFormat, ringFront(), frameBytes, s_sampleRate);
+    ringPopFront();
+  }
+  if (plcCount > 0) {
+    plcTotal += (uint64_t)plcCount;
+    MoonlightInstance::ClLogMessage("AudDec: %d PLC frame(s) (total=%llu)\n",
+      (int)plcCount, (unsigned long long)plcTotal);
+    for (ALint i = count; i < total; i++) {
+      opus_multistream_decode(s_OpusDecoder,
+        nullptr, 0, decodeBuf.data(), (int)s_samplesPerFrame, 0);
+      alBufferData(bufs[i], s_alFormat, decodeBuf.data(), frameBytes, s_sampleRate);
+    }
+  }
+  alSourceQueueBuffers(s_AlSource, total, bufs);
+}
+
 // ─── Feeder thread body ────────────────────────────────────────────────────────
 //
 // Owns the AL context and the Opus decoder.  The network callback (producer)
@@ -171,6 +197,12 @@ static void feederLoop() {
       MoonlightInstance::ClLogMessage("AudDec: jitter buffer ready (%d frames / %d ms), starting AL submission\n",
         s_jitterFrames, s_jitterFrames * fdms);
       jitterReady = true;
+
+      // First start: queue all AL buffers directly and start the source.
+      fillAndQueueBuffers(s_AlBuffers.data(), s_numBuffers, decodeBuf, plcTotal);
+      alSourcePlay(s_AlSource);
+      MoonlightInstance::ClLogMessage("AudDec: AL source started\n");
+      continue;
     }
 
     // ── Step 3: feed processed AL buffer slots ────────────────────────────────
@@ -186,35 +218,13 @@ static void feederLoop() {
       continue;
     }
 
-    // Recycle all processed AL buffers.  Real frames are drawn from the PCM ring;
-    // any remaining freed slots are filled with Opus PLC (genuine packet loss).
-    // Unqueue + re-queue are batched to minimise WASM→JS crossings.
-    ALint count    = (processed < (ALint)s_ringSize) ? processed : (ALint)s_ringSize;
-    ALint plcCount = processed - count;
+    // Recycle all processed AL buffers — batched to minimise WASM→JS crossings.
     ALuint bufs[128];  // processed <= s_numBuffers, always fits
     alSourceUnqueueBuffers(s_AlSource, processed, bufs);
-
-    for (ALint i = 0; i < count; i++) {
-      alBufferData(bufs[i], s_alFormat, ringFront(),
-        (ALsizei)(s_frameElems * sizeof(opus_int16)), s_sampleRate);
-      ringPopFront();
-    }
-    if (plcCount > 0) {
-      plcTotal += (uint64_t)plcCount;
-      MoonlightInstance::ClLogMessage("AudDec: %d lost packet(s), filling with PLC (total=%llu)\n",
-        (int)plcCount, (unsigned long long)plcTotal);
-      for (ALint i = count; i < processed; i++) {
-        opus_multistream_decode(s_OpusDecoder,
-          nullptr, 0, decodeBuf.data(), (int)s_samplesPerFrame, 0);
-        alBufferData(bufs[i], s_alFormat, decodeBuf.data(),
-          (ALsizei)(s_frameElems * sizeof(opus_int16)), s_sampleRate);
-      }
-    }
-    alSourceQueueBuffers(s_AlSource, processed, bufs);
+    fillAndQueueBuffers(bufs, processed, decodeBuf, plcTotal);
 
     if (s_ringSize == 0)
-      MoonlightInstance::ClLogMessage("AudDec: ring drained (submitted %d real + %d PLC)\n",
-        (int)count, (int)plcCount);
+      MoonlightInstance::ClLogMessage("AudDec: ring drained\n");
     if (processed >= (ALint)s_numBuffers)
       MoonlightInstance::ClLogMessage("AudDec: AL pool fully consumed (%d/%d slots), underrun risk\n",
         (int)processed, s_numBuffers);
@@ -309,18 +319,8 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
   alGenSources(1, &s_AlSource);
   alSourcei(s_AlSource, AL_LOOPING, AL_FALSE);
 
-  // Pre-queue silence so playback starts immediately and covers the initial
-  // jitter accumulation window while the feeder fills the PCM ring.
-  {
-    size_t frameBytes = s_samplesPerFrame * s_channelCount * sizeof(opus_int16);
-    std::vector<opus_int16> silence(s_samplesPerFrame * s_channelCount, 0);
-    for (ALuint buf : s_AlBuffers) {
-      alBufferData(buf, s_alFormat, silence.data(), (ALsizei)frameBytes, s_sampleRate);
-      alSourceQueueBuffers(s_AlSource, 1, &buf);
-    }
-  }
-  alSourcePlay(s_AlSource);
-  MoonlightInstance::ClLogMessage("AudDecInit: AL source playing with %d silence buffers\n", s_numBuffers);
+  // AL source is not started here — the feeder thread performs the initial
+  // queue-and-play once the jitter buffer has filled.
 
   // ── Allocate PCM ring (feeder-private, no locking needed) ────────────────
   s_frameElems = s_samplesPerFrame * s_channelCount;
