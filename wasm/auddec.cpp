@@ -243,12 +243,12 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
   int targetJitterMs = (g_AudioJitterMsOverride != 0) ? g_AudioJitterMsOverride : 100;
   s_jitterFrames = (targetJitterMs * (int)s_sampleRate + (int)s_samplesPerFrame * 1000 - 1)
                    / ((int)s_samplesPerFrame * 1000);
-  s_numBuffers = s_jitterFrames;
+  s_numBuffers = std::max(10, s_jitterFrames);
 
   int frameDurationMs = (int)s_samplesPerFrame * 1000 / (int)s_sampleRate;
-  MoonlightInstance::ClLogMessage("AudDecInit: ch=%d samplesPerFrame=%d sampleRate=%d jitterFrames=%d jitterMs=%d (target=%dms)\n",
+  MoonlightInstance::ClLogMessage("AudDecInit: ch=%d samplesPerFrame=%d sampleRate=%d jitterFrames=%d jitterMs=%d numBuffers=%d (target=%dms)\n",
     opusConfig->channelCount, opusConfig->samplesPerFrame, opusConfig->sampleRate,
-    s_jitterFrames, s_jitterFrames * frameDurationMs, targetJitterMs);
+    s_jitterFrames, s_jitterFrames * frameDurationMs, s_numBuffers, targetJitterMs);
 
   // ── Open AL device and context ────────────────────────────────────────────
   s_AlDevice = alcOpenDevice(NULL);
