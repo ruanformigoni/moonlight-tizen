@@ -141,7 +141,7 @@ static void feederLoop() {
       // Drop newest decoded frame if the ring is full (late-arrival burst).
       // Dropping newest preserves the oldest frames that are next in line for AL,
       // matching the original behaviour of ringPopBack() on processed==0.
-      if (s_ringSize >= s_ringCap - 1) {
+      if (s_ringSize >= s_ringCap) {
         ringPopBack();
         if (++overflowCount <= 3 || overflowCount % 100 == 0)
           MoonlightInstance::ClLogMessage("AudDec: PCM ring overflow, dropping oldest frame #%llu\n",
@@ -244,11 +244,13 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
   s_jitterFrames = (targetJitterMs * (int)s_sampleRate + (int)s_samplesPerFrame * 1000 - 1)
                    / ((int)s_samplesPerFrame * 1000);
   s_numBuffers = s_jitterFrames;
+  int burstSlack = std::max(10, s_jitterFrames*2);
+  s_ringCap    = s_jitterFrames + burstSlack;
 
   int frameDurationMs = (int)s_samplesPerFrame * 1000 / (int)s_sampleRate;
-  MoonlightInstance::ClLogMessage("AudDecInit: ch=%d samplesPerFrame=%d sampleRate=%d jitterFrames=%d jitterMs=%d (target=%dms)\n",
+  MoonlightInstance::ClLogMessage("AudDecInit: ch=%d samplesPerFrame=%d sampleRate=%d jitterFrames=%d jitterMs=%d numBuffers=%d ringCap=%d (target=%dms)\n",
     opusConfig->channelCount, opusConfig->samplesPerFrame, opusConfig->sampleRate,
-    s_jitterFrames, s_jitterFrames * frameDurationMs, targetJitterMs);
+    s_jitterFrames, s_jitterFrames * frameDurationMs, s_numBuffers, s_ringCap, targetJitterMs);
 
   // ── Open AL device and context ────────────────────────────────────────────
   s_AlDevice = alcOpenDevice(NULL);
@@ -322,7 +324,6 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
 
   // ── Allocate PCM ring (feeder-private, no locking needed) ────────────────
   s_frameElems = s_samplesPerFrame * s_channelCount;
-  s_ringCap    = s_jitterFrames + 1;
   s_ringBuffer.resize((size_t)s_ringCap * s_frameElems);
   s_ringHead = s_ringTail = s_ringSize = 0;
 
