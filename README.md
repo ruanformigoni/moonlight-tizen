@@ -51,6 +51,10 @@ Audio (OpenAL) and video (EMSS) now run through entirely separate pipelines. Pre
 both shared an EMSS instance, which caused video stalls when the audio track was
 renegotiated during TV UI interactions.
 
+## Usage
+
+I recommend [Samsung-Jellyfin-Installer](https://github.com/Jellyfin2Samsung/Samsung-Jellyfin-Installer) to install the release package, select `Custom WGT Package` in the UI after the program finds the TV in your network.
+
 The remainder of the original README.md follows.
 
 # Moonlight Tizen
