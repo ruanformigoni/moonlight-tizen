@@ -1,6 +1,7 @@
 #include "moonlight_wasm.hpp"
 
 #include <atomic>
+#include <cmath>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
@@ -266,18 +267,17 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
   s_samplesPerFrame = (size_t)opusConfig->samplesPerFrame;
   s_sampleRate      = (ALsizei)opusConfig->sampleRate;
 
-  // Compute frame count needed to cover targetJitterMs (ceiling division).
+  // Compute frame count needed to cover targetJitterMs.
   int targetJitterMs = (g_AudioJitterMsOverride != 0) ? g_AudioJitterMsOverride : 100;
-  s_jitterFrames = (targetJitterMs * (int)s_sampleRate + (int)s_samplesPerFrame * 1000 - 1)
-                   / ((int)s_samplesPerFrame * 1000);
+  double frameDurationMs = (double)s_samplesPerFrame * 1000.0 / s_sampleRate;
+  s_jitterFrames = (int)std::ceil((double)targetJitterMs / frameDurationMs);
   int burstSlack = std::max(10, s_jitterFrames*2);
   s_numBuffers = s_jitterFrames + burstSlack;
   s_ringCap    = s_jitterFrames + burstSlack;
 
-  int frameDurationMs = (int)s_samplesPerFrame * 1000 / (int)s_sampleRate;
   MoonlightInstance::ClLogMessage("AudDecInit: ch=%d samplesPerFrame=%d sampleRate=%d jitterFrames=%d jitterMs=%d numBuffers=%d ringCap=%d (target=%dms)\n",
     opusConfig->channelCount, opusConfig->samplesPerFrame, opusConfig->sampleRate,
-    s_jitterFrames, s_jitterFrames * frameDurationMs, s_numBuffers, s_ringCap, targetJitterMs);
+    s_jitterFrames, (int)(s_jitterFrames * frameDurationMs), s_numBuffers, s_ringCap, targetJitterMs);
 
   // ── Open AL device and context ────────────────────────────────────────────
   s_AlDevice = alcOpenDevice(NULL);
