@@ -1,3 +1,58 @@
+# Notes on this fork
+
+## OpenAL audio backend
+
+This fork replaces EMSS¹ audio with OpenAL², which fixes several audio problems:
+
+1. **Startup/Random speedup** — Accelerated audio playback for the first few seconds of every stream, producing a chipmunk-like effect, regardless of the PTS timestamps submitted. This seems like an EMSS-internal behavior that cannot be worked around at the application layer. OpenAL plays at the hardware sample rate with no timeline management, eliminating the problem.
+
+2. **Silence after suspension** — with EMSS, suspending the TV closed the audio track and resuming required re-opening it, a process that was unreliable and often produced permanent silence for the rest of the session. With OpenAL, the Web Audio context pauses on suspend and resumes transparently; the AL source restarts automatically on the next decoded frame with no track negotiation required.
+
+3. **Crackling** — earlier EMSS bugs (wrong decoding mode, incorrect packet fields, PTS not advancing on failure) caused audio glitches. These are eliminated by the backend switch.
+
+## Implementation Details
+
+Decoding and AL feeding run on a dedicated feeder thread, decoupled from the network
+receive thread. A software jitter buffer sits between the Opus decoder and the AL
+buffer pool, absorbing short network bursts without stalling playback. Its depth is
+computed from the negotiated audio packet duration (5 / 10 / 20 ms frames) so the
+wall-clock protection is consistent regardless of the server's audio configuration.
+When the buffer runs dry during a dropout, gaps are filled with Opus Packet Loss
+Concealment (PLC) rather than silence, preserving audio continuity. Both the packet
+duration and the jitter buffer target are configurable in Audio Settings.
+
+Through empirical testing it is noticiable that the Tizen does not handle 5ms frames
+properly which causes crackling audio frequently.
+
+The OpenAL context is opened at the stream's sample rate (48 kHz) rather than the
+platform default (44.1 kHz on Tizen TVs), preventing the resampling artefacts that
+produced intermittent background noise.
+
+¹EMSS (Elementary Media Stream Source) is Samsung's proprietary C++ API for feeding
+compressed media directly to a TV's hardware decoders from a WASM³ application.
+Video still uses EMSS since it works correctly for compressed bitstreams.
+
+²OpenAL on Emscripten is implemented over the Web Audio API. It is used here only for
+audio; it has no concept of presentation timestamps, which is why it does not suffer
+from the EMSS clock bug.
+
+³WASM (WebAssembly) is a binary instruction format that runs at near-native speed
+inside a browser sandbox.
+
+## Network logging
+
+Running `nc -u -l -p 9999` on the Sunshine host receives timestamped log messages
+from the TV client in real time, useful for diagnosing audio/video issues without
+needing adb/sdb access (which Samsung disables on retail firmware).
+
+## Independent audio and video processing
+
+Audio (OpenAL) and video (EMSS) now run through entirely separate pipelines. Previously
+both shared an EMSS instance, which caused video stalls when the audio track was
+renegotiated during TV UI interactions.
+
+The remainder of the original README.md follows.
+
 # Moonlight Tizen
 
 [![Project Status](https://img.shields.io/badge/project-actively_maintained-brightgreen?style=for-the-badge&logo=github)](#)
