@@ -3254,7 +3254,7 @@ function loadUserDataCb() {
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored audioJitterMs preferences.');
   getData('audioJitterMs', function(previousValue) {
     const val = (previousValue.audioJitterMs != null) ? previousValue.audioJitterMs : 0;
-    const labelMap = { 0: 'Auto', 50: '50 ms', 100: '100 ms', 200: '200 ms', 400: '400 ms' };
+    const labelMap = { 0: 'Auto', 25: '25 ms', 50: '50 ms', 100: '100 ms', 200: '200 ms', 400: '400 ms' };
     const label = labelMap[val] || 'Auto';
     $('#selectAudioJitter').text(label).data('value', val);
   });
