@@ -27,7 +27,7 @@ static ALsizei s_sampleRate      = 0;
 // g_AudioJitterMsOverride == 0 means "use default of 100 ms".
 extern int g_AudioJitterMsOverride;
 static int s_jitterFrames = 0;  // = ceil(targetJitterMs / frameDurationMs)
-static int s_numBuffers   = 0;  // = s_jitterFrames  (AL pool depth)
+static int s_numBuffers   = 0;  // = s_jitterFrames + burstSlack (AL pool; enters rotation organically)
 
 static OpusMSDecoder* s_OpusDecoder = nullptr;  // copy of s_OpusDecoder
 
@@ -145,6 +145,7 @@ static void feederLoop() {
   std::vector<opus_int16> decodeBuf(s_samplesPerFrame * s_channelCount);
 
   bool     jitterReady  = false;
+  int      alQueued     = 0;    // buffers currently in AL queue rotation (grows to s_numBuffers)
   uint64_t overflowCount = 0;
   uint64_t plcTotal      = 0;
 
@@ -198,10 +199,13 @@ static void feederLoop() {
         s_jitterFrames, s_jitterFrames * fdms);
       jitterReady = true;
 
-      // First start: queue all AL buffers directly and start the source.
-      fillAndQueueBuffers(s_AlBuffers.data(), s_numBuffers, decodeBuf, plcTotal);
+      // First start: queue only jitterFrames real frames — the remaining pool
+      // slots enter the rotation organically in Step 3 as real frames arrive.
+      fillAndQueueBuffers(s_AlBuffers.data(), s_jitterFrames, decodeBuf, plcTotal);
+      alQueued = s_jitterFrames;
       alSourcePlay(s_AlSource);
-      MoonlightInstance::ClLogMessage("AudDec: AL source started\n");
+      MoonlightInstance::ClLogMessage("AudDec: AL source started (%d/%d buffers active)\n",
+        alQueued, s_numBuffers);
       continue;
     }
 
@@ -225,9 +229,22 @@ static void feederLoop() {
 
     if (s_ringSize == 0)
       MoonlightInstance::ClLogMessage("AudDec: ring drained\n");
-    if (processed >= (ALint)s_numBuffers)
+    if (processed >= alQueued)
       MoonlightInstance::ClLogMessage("AudDec: AL pool fully consumed (%d/%d slots), underrun risk\n",
-        (int)processed, s_numBuffers);
+        (int)processed, alQueued);
+
+    // Top up: add unused buffer slots into the rotation while ring has real frames.
+    if (alQueued < s_numBuffers && s_ringSize > 0) {
+      ALint toAdd = std::min((ALint)s_numBuffers - alQueued, (ALint)s_ringSize);
+      ALsizei frameBytes = (ALsizei)(s_frameElems * sizeof(opus_int16));
+      for (ALint i = 0; i < toAdd; i++) {
+        alBufferData(s_AlBuffers[alQueued + i], s_alFormat, ringFront(), frameBytes, s_sampleRate);
+        ringPopFront();
+      }
+      alSourceQueueBuffers(s_AlSource, toAdd, &s_AlBuffers[alQueued]);
+      alQueued += toAdd;
+      MoonlightInstance::ClLogMessage("AudDec: AL pool grown to %d/%d buffers\n", alQueued, s_numBuffers);
+    }
 
     // Restart source if it stopped (underrun or Web Audio interruption).
     ALint state;
@@ -253,8 +270,8 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
   int targetJitterMs = (g_AudioJitterMsOverride != 0) ? g_AudioJitterMsOverride : 100;
   s_jitterFrames = (targetJitterMs * (int)s_sampleRate + (int)s_samplesPerFrame * 1000 - 1)
                    / ((int)s_samplesPerFrame * 1000);
-  s_numBuffers = s_jitterFrames;
   int burstSlack = std::max(10, s_jitterFrames*2);
+  s_numBuffers = s_jitterFrames + burstSlack;
   s_ringCap    = s_jitterFrames + burstSlack;
 
   int frameDurationMs = (int)s_samplesPerFrame * 1000 / (int)s_sampleRate;
