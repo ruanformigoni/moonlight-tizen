@@ -8,13 +8,24 @@
 // so the AudioContext and setInterval are created on the main thread with
 // autoplay permission.  Call stopAudioScheduler() when the stream ends.
 
-var _audNextTime         = 0.0;
-var _audRingHead         = 0;
-var _audCfg              = null;  // ring params cached once per AudDecInit
-var _audJitReady         = false;
-var _audLastRunningWallMs = 0;    // Date.now() at the last tick where ctx was running
-                                  // NOT updated during suspension — this is intentional:
-                                  // it lets the gap span the full suspension duration.
+var _audNextTime          = 0.0;
+var _audRingHead          = 0;
+var _audCfg               = null;  // ring params cached once per AudDecInit
+var _audJitReady          = false;
+var _audLastRunningWallMs = 0;     // Date.now() at last tick where ctx was running
+                                   // NOT updated during suspension — intentional:
+                                   // keeps the gap spanning the full suspend period.
+var _audPendingNodes      = [];    // {node, endTime} for every un-played scheduled node
+
+// Cancel and remove all pre-scheduled nodes that haven't played yet.
+// Called when a gap is detected so old audio doesn't replay after resumption.
+function _audCancelPending() {
+  for (var i = 0; i < _audPendingNodes.length; i++) {
+    try { _audPendingNodes[i].node.stop(0); } catch(e) {}
+  }
+  _audPendingNodes = [];
+  _audNextTime = 0.0;  // will be snapped to ctx.currentTime before next schedule
+}
 
 function startAudioScheduler() {
   // Stop any previous scheduler first.
@@ -33,11 +44,13 @@ function startAudioScheduler() {
         return;
       }
 
-      // ctx is running.  Measure wall-clock gap since the last running tick.
-      // This detects both AudioContext suspension (ctx.currentTime freezes, so
-      // it cannot be used to measure the gap) and JS-thread throttling.
-      var wallNow    = Date.now();
-      var wallGapMs  = (_audLastRunningWallMs > 0) ? (wallNow - _audLastRunningWallMs) : 0;
+      // ── Wall-clock gap detection ──────────────────────────────────────────
+      // ctx.currentTime freezes when the AudioContext is suspended, so it
+      // cannot measure the gap.  Date.now() always advances, giving the true
+      // elapsed time since the last running tick (which may span a Samsung
+      // TV UI overlay, reduced-priority background execution, etc.).
+      var wallNow   = Date.now();
+      var wallGapMs = (_audLastRunningWallMs > 0) ? (wallNow - _audLastRunningWallMs) : 0;
       _audLastRunningWallMs = wallNow;
 
       // Discover ring config the first time C++ publishes the config pointer.
@@ -70,21 +83,27 @@ function startAudioScheduler() {
 
       // If C++ cleared the config (AudDecCleanup set jsInitDone=0), reset.
       if (!Module.HEAP32[cfg.initIdx + 8]) {
+        _audCancelPending();
         _audCfg = null;
         return;
       }
 
-      // ── Gap recovery ────────────────────────────────────────────────────────
-      // If the wall-clock gap since the last running tick is substantially
-      // larger than the 5 ms tick interval, an interruption occurred and the
-      // C++ feeder has been filling the ring unattended.  Discard the stale
-      // frames so playback resumes at the current moment rather than replaying
-      // a backlog.
-      //
-      // We subtract targetMs from the gap because that many ms of audio was
-      // pre-scheduled into Web Audio before the interruption and will play
-      // correctly on its own once the context resumes.
-      if (wallGapMs > 15) {  // >3× the 5 ms tick — genuine interruption
+      // ── Trim nodes that have already played ───────────────────────────────
+      var now = ctx.currentTime;
+      while (_audPendingNodes.length > 0 && _audPendingNodes[0].endTime <= now) {
+        _audPendingNodes.shift();
+      }
+
+      // ── Gap recovery ──────────────────────────────────────────────────────
+      // If the wall-clock gap is substantially larger than the 5 ms tick, an
+      // interruption occurred.  Two things must happen:
+      //   1. Cancel pre-scheduled nodes still pending in the Web Audio graph —
+      //      without this, old audio plays through before new audio starts.
+      //   2. Discard stale PCM frames that accumulated in the ring while the
+      //      scheduler was not running.
+      if (wallGapMs > 15) {
+        _audCancelPending();  // stops old audio replaying after resumption
+
         var frameDurMs = cfg.samplesPerFrame * 1000 / cfg.sampleRate;
         var staleMs    = Math.max(0, wallGapMs - cfg.targetMs);
         var discard    = Math.min(
@@ -94,8 +113,8 @@ function startAudioScheduler() {
         if (discard > 0) {
           _audRingHead = (_audRingHead + discard) % cfg.ringCap;
           Module.HEAP32[cfg.ringSizeIdx] -= discard;
-          _audJitReady = false;  // rebuild jitter before resuming
         }
+        _audJitReady = false;  // rebuild jitter before resuming
       }
 
       // Wait until the jitter buffer is full before starting playback.
@@ -104,7 +123,6 @@ function startAudioScheduler() {
         _audJitReady = true;
       }
 
-      var now = ctx.currentTime;
       if (_audNextTime < now) _audNextTime = now;
 
       while (true) {
@@ -125,6 +143,7 @@ function startAudioScheduler() {
         src.connect(ctx.destination);
         src.start(_audNextTime);
         _audNextTime += abuf.duration;
+        _audPendingNodes.push({node: src, endTime: _audNextTime});
 
         _audRingHead = (_audRingHead + 1) % cfg.ringCap;
         // JS is single-threaded; C++ only increments s_ringSize.
@@ -140,6 +159,7 @@ function stopAudioScheduler() {
     clearInterval(window._mlAudioScheduler);
     window._mlAudioScheduler = null;
   }
+  _audCancelPending();
   window._mlAudioConfigPtr  = 0;
   _audCfg                   = null;
   _audLastRunningWallMs     = 0;
