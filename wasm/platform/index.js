@@ -2074,6 +2074,31 @@ function startGame(host, appID) {
     return;
   }
 
+  // Pre-create the AudioContext here, while we are still executing synchronously
+  // inside the user-gesture handler.  Creating it later (inside a Promise callback
+  // or a WASM proxy call) risks triggering the browser's autoplay policy, which on
+  // Tizen causes new AudioContext() to block indefinitely.
+  try {
+    if (window._mlAudioCtx) { try { window._mlAudioCtx.close(); } catch(e) {} }
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (AC) {
+      try {
+        window._mlAudioCtx = new AC({ sampleRate: 48000, latencyHint: 'interactive' });
+      } catch(e) {
+        window._mlAudioCtx = new AC();
+      }
+    } else {
+      window._mlAudioCtx = null;
+    }
+  } catch(e) {
+    window._mlAudioCtx = null;
+  }
+
+  // Start the Web Audio scheduler inside this user-gesture handler so that the
+  // AudioContext and setInterval are always on the main thread with autoplay
+  // permission.  Implementation lives in platform/audio.js.
+  startAudioScheduler();
+
   // Refresh the server info, because the user might have quit the game
   host.refreshServerInfo().then(function(ret) {
     host.getAppById(appID).then(function(appToStart) {
@@ -3254,7 +3279,7 @@ function loadUserDataCb() {
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored audioJitterMs preferences.');
   getData('audioJitterMs', function(previousValue) {
     const val = (previousValue.audioJitterMs != null) ? previousValue.audioJitterMs : 0;
-    const labelMap = { 0: 'Auto', 25: '25 ms', 50: '50 ms', 100: '100 ms', 200: '200 ms', 400: '400 ms' };
+    const labelMap = { 0: 'Auto', 5: '5 ms', 10: '10 ms', 15: '15 ms', 25: '25 ms', 50: '50 ms', 100: '100 ms', 200: '200 ms', 400: '400 ms' };
     const label = labelMap[val] || 'Auto';
     $('#selectAudioJitter').text(label).data('value', val);
   });

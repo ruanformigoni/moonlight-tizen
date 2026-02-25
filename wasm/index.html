@@ -314,6 +314,21 @@
                   </thead>
                   <tbody>
                     <tr>
+                      <td style="padding: 3px 12px 3px 0;">5 ms</td>
+                      <td style="padding: 3px 12px 3px 0;">~10 ms</td>
+                      <td style="padding: 3px 0;">Wired / lowest latency (requires 5 ms audio packets)</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 3px 12px 3px 0;">10 ms</td>
+                      <td style="padding: 3px 12px 3px 0;">~20 ms</td>
+                      <td style="padding: 3px 0;">Low latency (requires ≤10 ms audio packets)</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 3px 12px 3px 0;">15 ms</td>
+                      <td style="padding: 3px 12px 3px 0;">~30 ms</td>
+                      <td style="padding: 3px 0;">Low latency (requires 5 ms audio packets)</td>
+                    </tr>
+                    <tr>
                       <td style="padding: 3px 12px 3px 0;">25 ms</td>
                       <td style="padding: 3px 12px 3px 0;">~50 ms</td>
                       <td style="padding: 3px 0;">Ultra-low jitter</td>
@@ -346,6 +361,9 @@
               </div>
               <ul class="audioJitterMenu mdl-menu mdl-menu--bottom-left mdl-js-menu mdl-js-ripple-effect" for="selectAudioJitter">
                 <li class="mdl-menu__item" data-value="0">Auto</li>
+                <li class="mdl-menu__item" data-value="5">5 ms</li>
+                <li class="mdl-menu__item" data-value="10">10 ms</li>
+                <li class="mdl-menu__item" data-value="15">15 ms</li>
                 <li class="mdl-menu__item" data-value="25">25 ms</li>
                 <li class="mdl-menu__item" data-value="50">50 ms</li>
                 <li class="mdl-menu__item" data-value="100">100 ms</li>
@@ -515,6 +533,7 @@
   <script defer src="static/js/material.min.js"></script>
   <script type="text/javascript" src="$WEBAPIS/webapis/webapis.js"></script>
   <script type="text/javascript" src="platform/messages.js"></script>
+  <script type="text/javascript" src="platform/audio.js"></script>
   <script type="text/javascript" src="platform/common.js"></script>
   <script type="text/javascript" src="platform/gamepad.js"></script>
   <script type="text/javascript" src="platform/index.js"></script>
