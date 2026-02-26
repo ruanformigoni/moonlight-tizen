@@ -43,9 +43,9 @@ function startAudioScheduler() {
 
       // ── Wall-clock gap detection ──────────────────────────────────────────
       // ctx.currentTime freezes during AudioContext suspension, so it cannot
-      // measure the gap.  Date.now() always advances.  The threshold is 100 ms:
-      //   - Tizen JS-timer jitter under normal load:  < 50 ms → no false trigger
-      //   - Any real TV-UI interruption or suspension: > 100 ms → correct trigger
+      // measure the gap.  Date.now() always advances.
+      // During suspension _audLastWallMs is not updated (we returned early above),
+      // so the first running tick after resume measures the full suspension duration.
       var wallNow   = Date.now();
       var wallGapMs = (_audLastWallMs > 0) ? (wallNow - _audLastWallMs) : 0;
       _audLastWallMs = wallNow;
@@ -93,10 +93,13 @@ function startAudioScheduler() {
       }
 
       // ── Gap recovery ──────────────────────────────────────────────────────
-      // Cancel pre-scheduled nodes so stale audio doesn't replay, then discard
-      // all PCM that accumulated in the ring during the gap and rebuild the
-      // jitter buffer from scratch before resuming.
-      if (wallGapMs > 100) {
+      // Threshold is cfg.targetMs: if the wall-clock gap exceeds the entire
+      // pre-scheduled buffer depth, the scheduler fell too far behind to recover
+      // gracefully.  Cancel pre-scheduled nodes so stale audio doesn't replay,
+      // discard all PCM that accumulated in the ring, and rebuild the jitter
+      // buffer from scratch.  Any gap shorter than targetMs was covered by the
+      // pre-scheduled lookahead — no resync needed.
+      if (wallGapMs > cfg.targetMs) {
         _audCancelPending();
         var stale = Module.HEAP32[cfg.ringSizeIdx];
         if (stale > 0) {
