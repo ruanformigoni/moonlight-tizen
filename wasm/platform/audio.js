@@ -8,12 +8,13 @@
 // so the AudioContext and setInterval are created on the main thread with
 // autoplay permission.  Call stopAudioScheduler() when the stream ends.
 
-var _audNextTime     = 0.0;
-var _audRingHead     = 0;
-var _audCfg          = null;  // ring params cached once per AudDecInit
-var _audJitReady     = false;
-var _audLastWallMs   = 0;     // Date.now() at last scheduler tick (not during suspension)
-var _audPendingNodes = [];    // {node, endTime} for every scheduled node still in the graph
+var _audNextTime      = 0.0;
+var _audRingHead      = 0;
+var _audCfg           = null;   // ring params cached once per AudDecInit
+var _audJitReady      = false;
+var _audPendingFlush  = false;  // true while waiting for C++ to ack the flush request
+var _audLastWallMs    = 0;      // Date.now() at last scheduler tick (not during suspension)
+var _audPendingNodes  = [];     // {node, endTime} for every scheduled node still in the graph
 
 // Cancel and remove all pre-scheduled nodes that haven't played yet.
 function _audCancelPending() {
@@ -68,10 +69,11 @@ function startAudioScheduler() {
           targetMs:        Module.HEAP32[idx + 7],
           initIdx:         idx   // kept to check jsInitDone on each tick
         };
-        _audNextTime   = 0.0;
-        _audRingHead   = 0;
-        _audJitReady   = false;
-        _audLastWallMs = 0;
+        _audNextTime     = 0.0;
+        _audRingHead     = 0;
+        _audJitReady     = false;
+        _audPendingFlush = false;
+        _audLastWallMs   = 0;
         console.log('[audio] scheduler config acquired: ch=' + _audCfg.channels +
           ' spf=' + _audCfg.samplesPerFrame + ' rate=' + _audCfg.sampleRate +
           ' jitter=' + _audCfg.jitterFrames + 'f targetMs=' + _audCfg.targetMs);
@@ -101,17 +103,23 @@ function startAudioScheduler() {
       // pre-scheduled lookahead — no resync needed.
       if (wallGapMs > cfg.targetMs) {
         _audCancelPending();
-        var stale = Module.HEAP32[cfg.ringSizeIdx];
-        if (stale > 0) {
-          _audRingHead = (_audRingHead + stale) % cfg.ringCap;
-          Module.HEAP32[cfg.ringSizeIdx] = 0;
-        }
-        // Tell the C++ feeder to discard its encoded-packet queue.  Without
-        // this the feeder immediately re-fills the ring with stale Opus packets
-        // that accumulated during the interruption, causing the perceived lag
-        // to equal the interruption duration rather than just the jitter rebuild.
+        // Ask C++ to atomically flush its packet queue AND reset the ring to
+        // position 0.  Do NOT touch the ring here — any frames C++ decoded
+        // between now and when it processes the request would leave the ring
+        // in an inconsistent state, causing stale audio to satisfy the jitter
+        // check immediately (the 300-400ms delay bug).
         Module.HEAP32[cfg.initIdx + 9] = 1;  // flushRequest
+        _audPendingFlush = true;
         _audJitReady = false;
+      }
+
+      // Two-phase flush ack: C++ clears flushRequest LAST after resetting
+      // s_ringTail=0 and s_ringSize=0.  Only then do we reset _audRingHead
+      // so both sides agree the ring is empty at position 0.
+      if (_audPendingFlush) {
+        if (Module.HEAP32[cfg.initIdx + 9] !== 0) return;  // not yet acked
+        _audPendingFlush = false;
+        _audRingHead = 0;  // matches C++ s_ringTail = 0
       }
 
       // Wait until the jitter buffer is full before starting playback.
@@ -183,5 +191,6 @@ function stopAudioScheduler() {
   _audCancelPending();
   window._mlAudioConfigPtr = 0;
   _audCfg                  = null;
+  _audPendingFlush         = false;
   _audLastWallMs           = 0;
 }
