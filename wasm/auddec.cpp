@@ -28,7 +28,8 @@ struct alignas(4) AudioInitConfig {
   int frameElems;  // samplesPerFrame * channelCount
   int jitterFrames;
   int targetMs;
-  int jsInitDone;  // 1 = running, 0 = not initialised / cleanup in progress
+  int jsInitDone;    // 1 = running, 0 = not initialised / cleanup in progress
+  int flushRequest;  // JS sets 1 on gap recovery; feeder clears packet queue then resets to 0
 };
 static AudioInitConfig s_audioInitConfig;
 
@@ -103,6 +104,18 @@ static void feederLoop() {
           s_ringCap);
         lastDiag = now;
       }
+    }
+
+    // ── JS gap-recovery flush request ────────────────────────────────────────
+    // JS sets flushRequest=1 when it detects a wall-clock gap > targetMs.
+    // Clearing the encoded-packet queue here ensures the feeder doesn't decode
+    // stale Opus packets (accumulated during the interruption) into the ring
+    // immediately after JS has already discarded the stale PCM frames.
+    if (s_audioInitConfig.flushRequest) {
+      s_audioInitConfig.flushRequest = 0;
+      std::unique_lock<std::mutex> lk(s_pktMutex);
+      s_pktHead = s_pktTail = s_pktCount = 0;
+      MoonlightInstance::ClLogMessage("AudDec: packet queue flushed by JS gap recovery\n");
     }
 
     // ── Drain encoded-packet queue into PCM ring ────────────────────────────
@@ -204,7 +217,7 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
   s_audioInitConfig = { s_sampleRate, (int)s_channelCount,
     (int)(size_t)s_ringBuffer.data(), (int)(size_t)&s_ringSize,
     s_ringCap, (int)s_frameElems, s_jitterFrames, targetJitterMs,
-    /*jsInitDone=*/1 };
+    /*jsInitDone=*/1, /*flushRequest=*/0 };
   MoonlightInstance::ClLogMessage("AudDecInit: publishing config to JS scheduler (configPtr=%d)\n",
     (int)(size_t)&s_audioInitConfig);
   MAIN_THREAD_ASYNC_EM_ASM({

@@ -106,6 +106,11 @@ function startAudioScheduler() {
           _audRingHead = (_audRingHead + stale) % cfg.ringCap;
           Module.HEAP32[cfg.ringSizeIdx] = 0;
         }
+        // Tell the C++ feeder to discard its encoded-packet queue.  Without
+        // this the feeder immediately re-fills the ring with stale Opus packets
+        // that accumulated during the interruption, causing the perceived lag
+        // to equal the interruption duration rather than just the jitter rebuild.
+        Module.HEAP32[cfg.initIdx + 9] = 1;  // flushRequest
         _audJitReady = false;
       }
 
