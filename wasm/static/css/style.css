@@ -925,17 +925,22 @@ body {
     width: 59.4% !important;
 }
 .videoResolutionMenu, .videoFramerateMenu, .videoBitrateMenu,
-.audioConfigMenu, .audioPacketDurationMenu, .audioJitterMenu, .videoCodecMenu, .mdl-menu__outline {
+.audioConfigMenu, .audioPacketDurationMenu, .videoCodecMenu, .mdl-menu__outline {
     width: 100% !important;
     top: 2.5px !important;
     border-radius: 0 0 8px 8px;
 }
-.videoBitrateMenu {
+.audioJitterMenu, .mdl-menu__outline {
+    width: 100% !important;
+    top: 2.5px !important;
+    border-radius: 0 0 8px 8px;
+}
+.videoBitrateMenu, .audioJitterMenu {
     background-color: #333846;
     display: flex;
     align-items: center;
 }
-.videoBitrateMenu, .mdl-menu__container {
+.videoBitrateMenu, .audioJitterMenu, .mdl-menu__container {
     height: 20% !important;
 }
 .mdl-slider {
@@ -959,6 +964,21 @@ body {
     letter-spacing: 0.5px;
 }
 #bitrateLowestValue.hovered, #bitrateHighestValue.hovered {
+    background-color: #333846;
+}
+#jitterLowestValue {
+    color: #ececec;
+    margin: 0 -12px 0 14px;
+    font-size: 1.45rem;
+    letter-spacing: 0.5px;
+}
+#jitterHighestValue {
+    color: #ececec;
+    margin: 0 12px 0 -14px;
+    font-size: 1.45rem;
+    letter-spacing: 0.5px;
+}
+#jitterLowestValue.hovered, #jitterHighestValue.hovered {
     background-color: #333846;
 }
 .dropdown-items {

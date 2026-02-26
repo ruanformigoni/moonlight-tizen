@@ -996,23 +996,21 @@ const Views = {
     view: new ListView(() =>
       document.getElementById('audioJitterMenu')
       .parentNode.children[3].children[1].children),
-    up: function() {
-      this.view.prevOption();
-      document.getElementById(this.view.current()).focus();
+    up: function() {},
+    down: function() {},
+    left: function() {
+      jitterSlider.stepDown();
+      jitterSlider.dispatchEvent(new Event('input'));
     },
-    down: function() {
-      this.view.nextOption();
-      document.getElementById(this.view.current()).focus();
+    right: function() {
+      jitterSlider.stepUp();
+      jitterSlider.dispatchEvent(new Event('input'));
     },
-    left: function() {},
-    right: function() {},
     select: function() {
-      this.view.current().click();
       document.getElementById('selectAudioJitter').focus();
     },
     accept: function() {
-      this.view.current().click();
-      Navigation.pop();
+      document.getElementById('selectAudioJitter').click();
       document.getElementById('selectAudioJitter').focus();
     },
     back: function() {
