@@ -122,36 +122,54 @@ function startAudioScheduler() {
 
       if (_audNextTime < now) _audNextTime = now;
 
-      while (true) {
-        var lookaheadMs = (_audNextTime - ctx.currentTime) * 1000.0;
-        if (lookaheadMs >= cfg.targetMs) break;
-        if (Module.HEAP32[cfg.ringSizeIdx] <= 0) {
-          // Ring drained before reaching the target lookahead.  If nothing is
-          // pending in the Web Audio graph, reset the schedule anchor so that
-          // when the ring refills the new frames play immediately without drift.
+      // ── Schedule one batched AudioBufferSourceNode per tick ───────────────
+      // The old per-frame loop created one AudioBufferSourceNode per 10 ms
+      // Opus frame.  On Tizen each node-creation API call (createBuffer,
+      // createBufferSource, connect, start) is expensive enough that scheduling
+      // a full 100 ms batch (10 nodes) could take > 100 ms of CPU, causing the
+      // next setInterval tick to fire late, triggering a false gap recovery, and
+      // putting the scheduler in an infinite flush/rebuild loop (seen as 4+
+      // minutes of silence in the diagnostic log).
+      //
+      // Fix: compute how many frames are needed to reach targetMs of lookahead,
+      // fill them all into a single AudioBuffer, and create exactly one
+      // AudioBufferSourceNode per tick.  PCM fill work is identical; node-
+      // creation overhead drops from N calls to 1.
+      var lookaheadMs = (_audNextTime - ctx.currentTime) * 1000.0;
+      if (lookaheadMs < cfg.targetMs) {
+        var frameDurMs = cfg.samplesPerFrame * 1000.0 / cfg.sampleRate;
+        var frameCount = Math.ceil((cfg.targetMs - lookaheadMs) / frameDurMs);
+        var avail      = Module.HEAP32[cfg.ringSizeIdx];
+        frameCount     = Math.min(frameCount, avail);
+
+        if (frameCount <= 0) {
+          // Ring drained — reset anchor so refilled frames play without drift.
           if (_audPendingNodes.length === 0) _audNextTime = 0.0;
-          break;
-        }
+        } else {
+          var abuf = ctx.createBuffer(cfg.channels, frameCount * cfg.samplesPerFrame,
+                                      cfg.sampleRate);
+          for (var c = 0; c < cfg.channels; c++) {
+            var cd = abuf.getChannelData(c);
+            for (var f = 0; f < frameCount; f++) {
+              var head   = (_audRingHead + f) % cfg.ringCap;
+              var base   = (cfg.ringDataPtr >> 1) + head * cfg.frameElems;
+              var dstOff = f * cfg.samplesPerFrame;
+              for (var i = 0; i < cfg.samplesPerFrame; i++)
+                cd[dstOff + i] = Module.HEAP16[base + i * cfg.channels + c] * (1.0 / 32768.0);
+            }
+          }
+          var src = ctx.createBufferSource();
+          src.buffer = abuf;
+          src.connect(ctx.destination);
+          src.start(_audNextTime);
+          _audNextTime += abuf.duration;
+          _audPendingNodes.push({node: src, endTime: _audNextTime});
 
-        // Read one interleaved int16 frame from the PCM ring.
-        var base = (cfg.ringDataPtr >> 1) + _audRingHead * cfg.frameElems;
-        var abuf = ctx.createBuffer(cfg.channels, cfg.samplesPerFrame, cfg.sampleRate);
-        for (var c = 0; c < cfg.channels; c++) {
-          var cd = abuf.getChannelData(c);
-          for (var i = 0; i < cfg.samplesPerFrame; i++)
-            cd[i] = Module.HEAP16[base + i * cfg.channels + c] * (1.0 / 32768.0);
+          _audRingHead = (_audRingHead + frameCount) % cfg.ringCap;
+          // JS is single-threaded; C++ only increments s_ringSize.
+          // Worst-case race: stale increment seen — one extra drop, not a crash.
+          Module.HEAP32[cfg.ringSizeIdx] -= frameCount;
         }
-        var src = ctx.createBufferSource();
-        src.buffer = abuf;
-        src.connect(ctx.destination);
-        src.start(_audNextTime);
-        _audNextTime += abuf.duration;
-        _audPendingNodes.push({node: src, endTime: _audNextTime});
-
-        _audRingHead = (_audRingHead + 1) % cfg.ringCap;
-        // JS is single-threaded; C++ only increments s_ringSize.
-        // Worst-case race: we see a stale increment — one extra drop, not a crash.
-        Module.HEAP32[cfg.ringSizeIdx]--;
       }
     } catch(e) {}
   }, 5);
