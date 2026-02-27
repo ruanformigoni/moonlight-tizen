@@ -303,55 +303,16 @@
             <div class="setting-option">
               <label>Audio jitter buffer</label>
               <span class="mdl-list__item-text-body">
-                - Controls how many decoded audio frames are held before playback. A larger buffer smooths over network gaps but adds audio delay and extends the tail when audio stops on the host. Auto uses 100 ms.
-                <table style="margin: 8px 0 4px 0; border-collapse: collapse; font-size: 0.85em; color: #ccc;">
-                  <thead>
-                    <tr style="border-bottom: 1px solid #555;">
-                      <th style="padding: 4px 12px 4px 0; text-align: left;">Buffer</th>
-                      <th style="padding: 4px 12px 4px 0; text-align: left;">Dropout cover</th>
-                      <th style="padding: 4px 0; text-align: left;">Best for</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td style="padding: 3px 12px 3px 0;">25 ms</td>
-                      <td style="padding: 3px 12px 3px 0;">~50 ms</td>
-                      <td style="padding: 3px 0;">Ultra-low jitter</td>
-                    </tr>
-                    <tr>
-                      <td style="padding: 3px 12px 3px 0;">50 ms</td>
-                      <td style="padding: 3px 12px 3px 0;">~100 ms</td>
-                      <td style="padding: 3px 0;">Low jitter</td>
-                    </tr>
-                    <tr>
-                      <td style="padding: 3px 12px 3px 0;">100 ms</td>
-                      <td style="padding: 3px 12px 3px 0;">~200 ms</td>
-                      <td style="padding: 3px 0;">Stable WiFi (default)</td>
-                    </tr>
-                    <tr>
-                      <td style="padding: 3px 12px 3px 0;">200 ms</td>
-                      <td style="padding: 3px 12px 3px 0;">~400 ms</td>
-                      <td style="padding: 3px 0;">Typical WiFi</td>
-                    </tr>
-                    <tr>
-                      <td style="padding: 3px 12px 3px 0;">400 ms</td>
-                      <td style="padding: 3px 12px 3px 0;">~800 ms</td>
-                      <td style="padding: 3px 0;">Congested / unstable</td>
-                    </tr>
-                  </tbody>
-                </table>
+                - Controls how far ahead audio is pre-scheduled. A larger buffer smooths over network gaps but adds audio delay. Default is 100 ms.
               </span>
               <div id="audioJitterMenu">
-                <button type="button" id="selectAudioJitter" class="mdl-button mdl-js-button mdl-js-ripple-effect" data-value="0">Auto</button>
+                <button type="button" id="selectAudioJitter" class="mdl-button mdl-js-button mdl-js-ripple-effect">100 ms</button>
               </div>
-              <ul class="audioJitterMenu mdl-menu mdl-menu--bottom-left mdl-js-menu mdl-js-ripple-effect" for="selectAudioJitter">
-                <li class="mdl-menu__item" data-value="0">Auto</li>
-                <li class="mdl-menu__item" data-value="25">25 ms</li>
-                <li class="mdl-menu__item" data-value="50">50 ms</li>
-                <li class="mdl-menu__item" data-value="100">100 ms</li>
-                <li class="mdl-menu__item" data-value="200">200 ms</li>
-                <li class="mdl-menu__item" data-value="400">400 ms</li>
-              </ul>
+              <div class="audioJitterMenu mdl-menu mdl-menu--bottom-left mdl-js-menu mdl-js-ripple-effect" for="selectAudioJitter">
+                <span id="jitterLowestValue">50</span>
+                <input type="range" id="jitterSlider" class="mdl-slider mdl-js-slider" min="50" max="500" step="25" value="100">
+                <span id="jitterHighestValue">500</span>
+              </div>
             </div>
             <div class="setting-option">
               <label>Play audio on host</label>
@@ -515,6 +476,7 @@
   <script defer src="static/js/material.min.js"></script>
   <script type="text/javascript" src="$WEBAPIS/webapis/webapis.js"></script>
   <script type="text/javascript" src="platform/messages.js"></script>
+  <script type="text/javascript" src="platform/audio.js"></script>
   <script type="text/javascript" src="platform/common.js"></script>
   <script type="text/javascript" src="platform/gamepad.js"></script>
   <script type="text/javascript" src="platform/index.js"></script>

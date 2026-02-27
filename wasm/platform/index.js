@@ -48,7 +48,7 @@ function attachListeners() {
   $('#flipXYfaceButtonsSwitch').on('click', saveFlipXYfaceButtons);
   $('.audioConfigMenu li').on('click', saveAudioConfiguration);
   $('.audioPacketDurationMenu li').on('click', saveAudioPacketDuration);
-  $('.audioJitterMenu li').on('click', saveAudioJitterMs);
+  $('#jitterSlider').on('input', saveAudioJitterMs);
   $('#playHostAudioSwitch').on('click', savePlayHostAudio);
   $('.videoCodecMenu li').on('click', saveVideoCodec);
   $('#hdrModeSwitch').on('click', saveHdrMode);
@@ -2074,6 +2074,31 @@ function startGame(host, appID) {
     return;
   }
 
+  // Pre-create the AudioContext here, while we are still executing synchronously
+  // inside the user-gesture handler.  Creating it later (inside a Promise callback
+  // or a WASM proxy call) risks triggering the browser's autoplay policy, which on
+  // Tizen causes new AudioContext() to block indefinitely.
+  try {
+    if (window._mlAudioCtx) { try { window._mlAudioCtx.close(); } catch(e) {} }
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (AC) {
+      try {
+        window._mlAudioCtx = new AC({ sampleRate: 48000, latencyHint: 'interactive' });
+      } catch(e) {
+        window._mlAudioCtx = new AC();
+      }
+    } else {
+      window._mlAudioCtx = null;
+    }
+  } catch(e) {
+    window._mlAudioCtx = null;
+  }
+
+  // Start the Web Audio scheduler inside this user-gesture handler so that the
+  // AudioContext and setInterval are always on the main thread with autoplay
+  // permission.  Implementation lives in platform/audio.js.
+  startAudioScheduler();
+
   // Refresh the server info, because the user might have quit the game
   host.refreshServerInfo().then(function(ret) {
     host.getAppById(appID).then(function(appToStart) {
@@ -2146,7 +2171,7 @@ function startGame(host, appID) {
       const flipXYfaceButtons = $('#flipXYfaceButtonsSwitch').parent().hasClass('is-checked') ? 1 : 0;
       var audioConfig = $('#selectAudio').data('value').toString();
       const audioPacketDuration = parseInt($('#selectAudioPacketDuration').data('value')) || 0;
-      const audioJitterMs = parseInt($('#selectAudioJitter').data('value')) || 0;
+      const audioJitterMs = parseInt($('#jitterSlider').val());
       const playHostAudio = $('#playHostAudioSwitch').parent().hasClass('is-checked') ? 1 : 0;
       var videoCodec = $('#selectCodec').data('value').toString();
       const hdrMode = $('#hdrModeSwitch').parent().hasClass('is-checked') ? 1 : 0;
@@ -2718,9 +2743,8 @@ function saveAudioPacketDuration() {
 }
 
 function saveAudioJitterMs() {
-  const chosenValue = parseInt($(this).data('value')) || 0;
-  const chosenLabel = $(this).text();
-  $('#selectAudioJitter').text(chosenLabel).data('value', chosenValue);
+  var chosenValue = $('#jitterSlider').val();
+  $('#selectAudioJitter').html(chosenValue + ' ms');
   console.log('%c[index.js, saveAudioJitterMs]', 'color: green;', 'Saving audio jitter buffer: ' + chosenValue);
   storeData('audioJitterMs', chosenValue, null);
 }
@@ -2959,8 +2983,9 @@ function restoreDefaultsSettingsValues() {
   $('#selectAudioPacketDuration').text('Auto').data('value', defaultAudioPacketDuration);
   storeData('audioPacketDuration', defaultAudioPacketDuration, null);
 
-  const defaultAudioJitterMs = 0;
-  $('#selectAudioJitter').text('Auto').data('value', defaultAudioJitterMs);
+  const defaultAudioJitterMs = '100';
+  $('#jitterSlider')[0].MaterialSlider.change(defaultAudioJitterMs);
+  $('#selectAudioJitter').html(defaultAudioJitterMs + ' ms');
   storeData('audioJitterMs', defaultAudioJitterMs, null);
 
   const defaultPlayHostAudio = false;
@@ -3253,10 +3278,9 @@ function loadUserDataCb() {
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored audioJitterMs preferences.');
   getData('audioJitterMs', function(previousValue) {
-    const val = (previousValue.audioJitterMs != null) ? previousValue.audioJitterMs : 0;
-    const labelMap = { 0: 'Auto', 25: '25 ms', 50: '50 ms', 100: '100 ms', 200: '200 ms', 400: '400 ms' };
-    const label = labelMap[val] || 'Auto';
-    $('#selectAudioJitter').text(label).data('value', val);
+    var val = (previousValue.audioJitterMs != null) ? String(previousValue.audioJitterMs) : '100';
+    $('#jitterSlider')[0].MaterialSlider.change(val);
+    $('#selectAudioJitter').html($('#jitterSlider').val() + ' ms');
   });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored playHostAudio preferences.');

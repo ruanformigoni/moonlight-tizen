@@ -74,6 +74,8 @@ function handleMessage(msg) {
   console.log('%c[messages.js, handleMessage]', 'color: gray;', 'Message data: ', msg);
   // If it's a recognized event, notify the appropriate function
   if (msg.indexOf('streamTerminated: ') === 0) {
+    // Stop the Web Audio scheduler so it doesn't try to read freed WASM memory.
+    stopAudioScheduler();
     // Remove the on-screen overlays
     $('#connection-warnings, #performance-stats').css('display', 'none');
     // Remove the video stream now

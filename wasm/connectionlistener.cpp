@@ -62,8 +62,8 @@ void MoonlightInstance::ClLogMessage(const char* format, ...) {
   // Static mutex guards against concurrent writes from audio/video threads.
   static std::mutex s_logMutex;
   static long long s_logStartMs = 0;
-  static int s_logUdpSock = -1;
-  static struct sockaddr_in s_logUdpAddr = {};
+  static int s_logSock = -1;
+  static struct sockaddr_in s_logAddr = {};
 
   std::lock_guard<std::mutex> lk(s_logMutex);
 
@@ -74,32 +74,34 @@ void MoonlightInstance::ClLogMessage(const char* format, ...) {
   if (s_logStartMs == 0) s_logStartMs = nowMs;
   long long relMs = nowMs - s_logStartMs;
 
-  // UDP sink: open socket lazily once the host IP is known, then stream every
+  // TCP sink: connect lazily once the host IP is known, then stream every
   // log line to port 9999 on the Sunshine PC.
-  // On the PC: nc -u -l -p 9999 > moonlight.log
-  if (s_logUdpSock < 0 && g_Instance != nullptr && !g_Instance->m_Host.empty()) {
-    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+  // On the PC: nc -l -p 9999 > moonlight.log
+  if (s_logSock < 0 && g_Instance != nullptr && !g_Instance->m_Host.empty()) {
+    int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sock >= 0) {
       struct sockaddr_in addr = {};
       addr.sin_family = AF_INET;
       addr.sin_port = htons(9999);
-      if (inet_pton(AF_INET, g_Instance->m_Host.c_str(), &addr.sin_addr) == 1) {
-        s_logUdpAddr = addr;
-        s_logUdpSock = sock;
+      if (inet_pton(AF_INET, g_Instance->m_Host.c_str(), &addr.sin_addr) == 1 &&
+          connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
+        s_logAddr = addr;
+        s_logSock = sock;
         const char* banner = "=== moonlight-tizen log stream started ===\n";
-        sendto(sock, banner, strlen(banner), 0,
-               (struct sockaddr*)&s_logUdpAddr, sizeof(s_logUdpAddr));
+        send(sock, banner, strlen(banner), 0);
       } else {
         close(sock);
       }
     }
   }
-  if (s_logUdpSock >= 0) {
-    char udpMsg[1060];
-    int n = snprintf(udpMsg, sizeof(udpMsg), "[%lld.%03lld] %s",
+  if (s_logSock >= 0) {
+    char buf[1060];
+    int n = snprintf(buf, sizeof(buf), "[%lld.%03lld] %s",
                      relMs / 1000, relMs % 1000, message);
-    sendto(s_logUdpSock, udpMsg, n > 0 ? (size_t)n : 0, 0,
-           (struct sockaddr*)&s_logUdpAddr, sizeof(s_logUdpAddr));
+    if (send(s_logSock, buf, n > 0 ? (size_t)n : 0, 0) < 0) {
+      close(s_logSock);
+      s_logSock = -1;  // reconnect on next message
+    }
   }
 }
 
