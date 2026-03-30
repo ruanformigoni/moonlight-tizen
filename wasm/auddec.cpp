@@ -1,12 +1,5 @@
 #include "moonlight_wasm.hpp"
 
-#include <atomic>
-#include <cmath>
-#include <condition_variable>
-#include <mutex>
-#include <thread>
-#include <vector>
-
 #include <emscripten.h>
 
 // g_AudioJitterMsOverride == 0  →  use default of 100 ms.
@@ -18,106 +11,20 @@ static int    s_sampleRate      = 0;
 
 static OpusMSDecoder* s_OpusDecoder = nullptr;
 
-// ─── Encoded-packet queue  (network thread → feeder thread) ──────────────────
-// Pre-allocated fixed-size slots avoid per-packet heap allocation.
-// 4 KiB far exceeds the largest legal Opus packet (≤ 1275 B per RFC 6716).
-static constexpr int kMaxPacketBytes = 4096;
-
-struct PacketSlot {
-  uint8_t data[kMaxPacketBytes];
-  int     length;
-};
-
-static std::vector<PacketSlot> s_pktQueue;  // circular, capacity = s_pktCap
-static int  s_pktHead  = 0;
-static int  s_pktTail  = 0;
-static int  s_pktCount = 0;
-static int  s_pktCap   = 0;
-static std::mutex              s_pktMutex;
-static std::condition_variable s_pktCv;
-
-// ─── Decoded-frame slot pool ──────────────────────────────────────────────────
-// After decoding each Opus packet the feeder writes PCM into slot[s_slotIdx %
-// kNumSlots] then calls MAIN_THREAD_ASYNC_EM_ASM to push the pointer to the
-// JS audio scheduler (_audReceiveFrame).  The pool must be large enough that
-// the main thread processes each slot before the feeder cycles back around;
-// kNumSlots * frameDurationMs (32 * 10 ms = 320 ms) is the protection window.
+// Decoded PCM slot pool — rotating slots so the main thread has time to read
+// HEAP16 at the pointer before we overwrite it with the next frame.
+// 32 slots × frame duration (5/10/20ms) = 160–640ms protection window.
 static constexpr int kNumSlots      = 32;
 static constexpr int kMaxFrameElems = 4096;  // 480 * 8 ch = 3840, rounded up
 static opus_int16    s_frameSlots[kNumSlots][kMaxFrameElems];
 static int           s_slotIdx = 0;
 
-// ─── Feeder thread ────────────────────────────────────────────────────────────
-static std::thread       s_feederThread;
-static std::atomic<bool> s_feederRunning{false};
-
-static void feederLoop() {
-  while (s_feederRunning.load(std::memory_order_relaxed)) {
-
-    // ── Drain encoded-packet queue → decode → push to JS ─────────────────────
-    while (true) {
-      uint8_t pktData[kMaxPacketBytes];
-      int     pktLen = 0;
-      {
-        std::unique_lock<std::mutex> lk(s_pktMutex);
-        if (s_pktCount == 0) break;
-        const PacketSlot& slot = s_pktQueue[s_pktHead];
-        pktLen = slot.length;
-        __builtin_memcpy(pktData, slot.data, (size_t)pktLen);
-        s_pktHead = (s_pktHead + 1) % s_pktCap;
-        --s_pktCount;
-      }  // release lock before decode — Opus is CPU-intensive
-
-      opus_int16* dst = s_frameSlots[s_slotIdx % kNumSlots];
-      int n = opus_multistream_decode(
-        s_OpusDecoder, pktData, pktLen,
-        dst, (int)s_samplesPerFrame, 0);
-      if (n > 0) {
-        // Pass slot pointer + audio params to main-thread JS scheduler.
-        // _audReceiveFrame reads HEAP16 at this address and schedules an
-        // AudioBufferSourceNode before the feeder cycles back to this slot
-        // (kNumSlots frames = 320 ms protection at 10 ms/frame).
-        int slotPtr = (int)(size_t)dst;
-        int spf     = (int)s_samplesPerFrame;
-        int ch      = (int)s_channelCount;
-        int rate    = s_sampleRate;
-        MAIN_THREAD_ASYNC_EM_ASM({
-          if (typeof _audReceiveFrame === 'function') _audReceiveFrame($0, $1, $2, $3);
-        }, slotPtr, spf, ch, rate);
-        s_slotIdx++;
-      }
-    }
-
-    // ── Wait for the next encoded packet ──────────────────────────────────────
-    {
-      std::unique_lock<std::mutex> lk(s_pktMutex);
-      s_pktCv.wait_for(lk, std::chrono::milliseconds(1), [] {
-        return s_pktCount > 0 || !s_feederRunning.load(std::memory_order_relaxed);
-      });
-    }
-  }
-}
-
-// ─── AudDecInit ───────────────────────────────────────────────────────────────
-
 int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONFIGURATION opusConfig, void* context, int arFlags) {
   s_channelCount    = (size_t)opusConfig->channelCount;
   s_samplesPerFrame = (size_t)opusConfig->samplesPerFrame;
   s_sampleRate      = opusConfig->sampleRate;
+  s_slotIdx         = 0;
 
-  int targetJitterMs = (g_AudioJitterMsOverride != 0) ? g_AudioJitterMsOverride : 100;
-  double frameDurationMs = (double)s_samplesPerFrame * 1000.0 / s_sampleRate;
-  int jitterFrames = (int)std::ceil((double)targetJitterMs / frameDurationMs);
-
-  // ── Allocate encoded-packet queue ────────────────────────────────────────
-  s_pktCap = jitterFrames * 4;
-  if (s_pktCap < 64) s_pktCap = 64;
-  s_pktQueue.resize(s_pktCap);
-  s_pktHead = s_pktTail = s_pktCount = 0;
-
-  s_slotIdx = 0;
-
-  // ── Create Opus decoder ───────────────────────────────────────────────────
   int rc;
   s_OpusDecoder = opus_multistream_decoder_create(
     opusConfig->sampleRate, opusConfig->channelCount,
@@ -128,33 +35,19 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
     return -1;
   }
 
-  // ── Publish targetMs to JS scheduler ─────────────────────────────────────
+  // Publish the UI jitter buffer setting to the JS audio scheduler.
+  int targetJitterMs = (g_AudioJitterMsOverride != 0) ? g_AudioJitterMsOverride : 100;
   MAIN_THREAD_ASYNC_EM_ASM({
     window._mlAudioTargetMs = $0;
   }, targetJitterMs);
 
-  // ── Start feeder thread ───────────────────────────────────────────────────
-  s_feederRunning.store(true, std::memory_order_release);
-  s_feederThread = std::thread(feederLoop);
   return 0;
 }
 
-// ─── AudDecCleanup ────────────────────────────────────────────────────────────
-
 void MoonlightInstance::AudDecCleanup(void) {
-  if (s_feederThread.joinable()) {
-    s_feederRunning.store(false, std::memory_order_release);
-    s_pktCv.notify_all();
-    s_feederThread.join();
-  }
-
   MAIN_THREAD_ASYNC_EM_ASM({
     if (typeof stopAudioScheduler === 'function') stopAudioScheduler();
   });
-
-  s_pktQueue.clear();
-  s_pktQueue.shrink_to_fit();
-  s_pktHead = s_pktTail = s_pktCount = s_pktCap = 0;
 
   if (s_OpusDecoder) {
     opus_multistream_decoder_destroy(s_OpusDecoder);
@@ -162,30 +55,25 @@ void MoonlightInstance::AudDecCleanup(void) {
   }
 }
 
-// ─── AudDecDecodeAndPlaySample ────────────────────────────────────────────────
-//
-// Called by the moonlight-common network thread on every received audio packet.
-// Pushes the raw encoded packet into the lock-protected queue; the feeder thread
-// decodes and dispatches to the JS scheduler independently.
-
+// Called by moonlight-common-c on every received audio packet.
+// Decodes Opus inline and posts the PCM to the JS Web Audio scheduler.
 void MoonlightInstance::AudDecDecodeAndPlaySample(char* sampleData, int sampleLength) {
-  if (!s_feederRunning.load(std::memory_order_relaxed)) return;
+  if (!s_OpusDecoder) return;
 
-  if (sampleLength <= 0 || sampleLength > kMaxPacketBytes) return;
+  opus_int16* dst = s_frameSlots[s_slotIdx % kNumSlots];
+  int n = opus_multistream_decode(
+    s_OpusDecoder, (const unsigned char*)sampleData, sampleLength,
+    dst, (int)s_samplesPerFrame, 0);
+  if (n <= 0) return;
 
-  {
-    std::unique_lock<std::mutex> lk(s_pktMutex);
-    if (s_pktCount >= s_pktCap) {
-      s_pktHead = (s_pktHead + 1) % s_pktCap;
-      --s_pktCount;
-    }
-    PacketSlot& slot = s_pktQueue[s_pktTail];
-    __builtin_memcpy(slot.data, sampleData, (size_t)sampleLength);
-    slot.length = sampleLength;
-    s_pktTail = (s_pktTail + 1) % s_pktCap;
-    ++s_pktCount;
-  }
-  s_pktCv.notify_one();
+  int slotPtr = (int)(size_t)dst;
+  int spf     = (int)s_samplesPerFrame;
+  int ch      = (int)s_channelCount;
+  int rate    = s_sampleRate;
+  MAIN_THREAD_ASYNC_EM_ASM({
+    if (typeof _audReceiveFrame === 'function') _audReceiveFrame($0, $1, $2, $3);
+  }, slotPtr, spf, ch, rate);
+  s_slotIdx++;
 }
 
 AUDIO_RENDERER_CALLBACKS MoonlightInstance::s_ArCallbacks = {
