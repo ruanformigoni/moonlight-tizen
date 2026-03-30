@@ -1,7 +1,6 @@
 #include "moonlight_wasm.hpp"
 
 #include <atomic>
-#include <chrono>
 #include <cmath>
 #include <condition_variable>
 #include <mutex>
@@ -10,11 +9,8 @@
 
 #include <emscripten.h>
 
-// ─── Jitter / sizing ──────────────────────────────────────────────────────────
 // g_AudioJitterMsOverride == 0  →  use default of 100 ms.
 extern int g_AudioJitterMsOverride;
-static int    s_jitterFrames    = 0;
-static double s_frameDurationMs = 0.0;
 
 static size_t s_samplesPerFrame = 0;
 static size_t s_channelCount    = 0;
@@ -56,18 +52,7 @@ static std::thread       s_feederThread;
 static std::atomic<bool> s_feederRunning{false};
 
 static void feederLoop() {
-  auto lastDiag = std::chrono::steady_clock::now();
-
   while (s_feederRunning.load(std::memory_order_relaxed)) {
-
-    // ── Periodic diagnostic ───────────────────────────────────────────────────
-    {
-      auto now = std::chrono::steady_clock::now();
-      if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDiag).count() >= 5) {
-        MoonlightInstance::ClLogMessage("AudDec: feeder alive, pktCount=%d\n", s_pktCount);
-        lastDiag = now;
-      }
-    }
 
     // ── Drain encoded-packet queue → decode → push to JS ─────────────────────
     while (true) {
@@ -100,8 +85,6 @@ static void feederLoop() {
           if (typeof _audReceiveFrame === 'function') _audReceiveFrame($0, $1, $2, $3);
         }, slotPtr, spf, ch, rate);
         s_slotIdx++;
-      } else {
-        MoonlightInstance::ClLogMessage("AudDec: Opus decode failed rc=%d\n", n);
       }
     }
 
@@ -113,8 +96,6 @@ static void feederLoop() {
       });
     }
   }
-
-  MoonlightInstance::ClLogMessage("AudDec: feeder thread exiting\n");
 }
 
 // ─── AudDecInit ───────────────────────────────────────────────────────────────
@@ -125,16 +106,11 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
   s_sampleRate      = opusConfig->sampleRate;
 
   int targetJitterMs = (g_AudioJitterMsOverride != 0) ? g_AudioJitterMsOverride : 100;
-  s_frameDurationMs  = (double)s_samplesPerFrame * 1000.0 / s_sampleRate;
-  s_jitterFrames     = (int)std::ceil((double)targetJitterMs / s_frameDurationMs);
-
-  MoonlightInstance::ClLogMessage(
-    "AudDecInit: ch=%d spf=%d rate=%d jitterFrames=%d target=%dms\n",
-    opusConfig->channelCount, opusConfig->samplesPerFrame, opusConfig->sampleRate,
-    s_jitterFrames, targetJitterMs);
+  double frameDurationMs = (double)s_samplesPerFrame * 1000.0 / s_sampleRate;
+  int jitterFrames = (int)std::ceil((double)targetJitterMs / frameDurationMs);
 
   // ── Allocate encoded-packet queue ────────────────────────────────────────
-  s_pktCap = s_jitterFrames * 4;
+  s_pktCap = jitterFrames * 4;
   if (s_pktCap < 64) s_pktCap = 64;
   s_pktQueue.resize(s_pktCap);
   s_pktHead = s_pktTail = s_pktCount = 0;
@@ -147,10 +123,8 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
     opusConfig->sampleRate, opusConfig->channelCount,
     opusConfig->streams, opusConfig->coupledStreams,
     opusConfig->mapping, &rc);
-  MoonlightInstance::ClLogMessage("AudDecInit: opus_multistream_decoder_create rc=%d\n", rc);
   g_Instance->m_OpusDecoder = s_OpusDecoder;
   if (!s_OpusDecoder) {
-    MoonlightInstance::ClLogMessage("AudDecInit: opus decoder creation failed\n");
     return -1;
   }
 
@@ -162,15 +136,12 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
   // ── Start feeder thread ───────────────────────────────────────────────────
   s_feederRunning.store(true, std::memory_order_release);
   s_feederThread = std::thread(feederLoop);
-  MoonlightInstance::ClLogMessage("AudDecInit: feeder thread started\n");
   return 0;
 }
 
 // ─── AudDecCleanup ────────────────────────────────────────────────────────────
 
 void MoonlightInstance::AudDecCleanup(void) {
-  MoonlightInstance::ClLogMessage("AudDecCleanup\n");
-
   if (s_feederThread.joinable()) {
     s_feederRunning.store(false, std::memory_order_release);
     s_pktCv.notify_all();
@@ -200,17 +171,13 @@ void MoonlightInstance::AudDecCleanup(void) {
 void MoonlightInstance::AudDecDecodeAndPlaySample(char* sampleData, int sampleLength) {
   if (!s_feederRunning.load(std::memory_order_relaxed)) return;
 
-  if (sampleLength <= 0 || sampleLength > kMaxPacketBytes) {
-    MoonlightInstance::ClLogMessage("AudDec: packet length %d out of range, dropping\n", sampleLength);
-    return;
-  }
+  if (sampleLength <= 0 || sampleLength > kMaxPacketBytes) return;
 
   {
     std::unique_lock<std::mutex> lk(s_pktMutex);
     if (s_pktCount >= s_pktCap) {
       s_pktHead = (s_pktHead + 1) % s_pktCap;
       --s_pktCount;
-      MoonlightInstance::ClLogMessage("AudDec: packet queue overflow, dropping oldest\n");
     }
     PacketSlot& slot = s_pktQueue[s_pktTail];
     __builtin_memcpy(slot.data, sampleData, (size_t)sampleLength);

@@ -315,9 +315,6 @@ static void AudioReceiveThreadProc(void* context) {
             // Only count actual audio data (not FEC) in the packets to drop calculation
             if (rtp->packetType == 97) {
                 packetsToDrop--;
-                if (packetsToDrop == 0) {
-                    Limelog("Audio: initial drop complete, first real packet passing through\n");
-                }
             }
             continue;
         }

@@ -54,8 +54,7 @@ add_library(moonlight-common-c STATIC
     moonlight-common-c/src/VideoStream.c
 )
 target_compile_definitions(moonlight-common-c PUBLIC
-    LC_CHROME
-    LC_LOG)
+    LC_CHROME)
 target_include_directories(moonlight-common-c PUBLIC
     moonlight-common-c/src
     moonlight-common-c/enet/include
@@ -276,8 +275,7 @@ set_target_properties(moonlight-wasm
              -s ENVIRONMENT_MAY_BE_TIZEN \
              -s USE_CRYPTO=1 \
              -s USE_SSL=1 \
-             -s USE_CURL=1 \
-             -lopenal")
+             -s USE_CURL=1")
 target_link_libraries(moonlight-wasm PUBLIC
     libgamestream
     h264bitstream
